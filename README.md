@@ -1,4 +1,4 @@
-# YuzukiUI
+# YuzukiGUI
 
 A low-footprint, retained-mode C++ UI framework for Windows — built with the hope
 that it becomes the most delightful GUI framework out there. And that's not where
