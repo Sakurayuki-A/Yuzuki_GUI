@@ -1,0 +1,9 @@
+build/
+out/
+.vs/
+*.user
+*.suo
+*.VC.db
+.cache/
+CMakeUserPresets.json
+perf_demo.log
