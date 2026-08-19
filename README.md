@@ -1,4 +1,4 @@
-# YuzukiGUI
+# YuzukiUI
 
 A low-footprint, retained-mode C++ UI framework for Windows — built with the hope
 that it becomes the most delightful GUI framework out there. And that's not where
@@ -69,6 +69,15 @@ grid that repaints only what changed.
 | layout_test    | Layout invariants across every panel type                        |
 | perf_demo      | 2000-widget tree with dirty-rect partial repaint                 |
 | codex_ui       | A full chat UI built on the framework                            |
+
+## Open-source fonts
+
+YuzukiUI is built on the shoulders of two great open typefaces:
+
+- **[Phosphor](https://phosphoricons.com)** — the icon font behind the vector icon
+  system (`IconId` / `icon_glyph`). MIT licensed.
+- **[Satoshi](https://www.fontshare.com/fonts/satoshi)** — by Fontshare, the default UI
+  font shipped with the demos. Free for commercial use.
 
 ## Status
 
