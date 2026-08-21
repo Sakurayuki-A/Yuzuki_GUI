@@ -90,3 +90,15 @@ add_custom_command(TARGET icofont_demo POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/icofonts/regular/Phosphor.ttf
         $<TARGET_FILE_DIR:icofont_demo>/Phosphor.ttf)
+
+add_executable(notification_demo
+    notification_demo/main.cpp
+    notification_demo/main_page.cpp)
+target_link_libraries(notification_demo PRIVATE yuzuki)
+add_custom_command(TARGET notification_demo POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/Satoshi-Regular.otf
+        $<TARGET_FILE_DIR:notification_demo>/Satoshi-Regular.otf
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/icofonts/regular/Phosphor.ttf
+        $<TARGET_FILE_DIR:notification_demo>/Phosphor.ttf)

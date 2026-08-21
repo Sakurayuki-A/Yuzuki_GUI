@@ -347,9 +347,29 @@ cbuffer cb : register(b0) {
 
 D2D_PS_ENTRY(PS) {
     float2 rel = D2DGetScenePosition().xy - center;
-    float angle = atan2(rel.y, rel.x) - start_angle;
-    float t = frac(angle / sweep_angle);
-    float4 result = lerp(color_a, color_b, t);
+    // Rotate the sample into the sweep frame (arc starts at 0 deg): the atan2 branch
+    // cut at +/-pi then lands exactly at the arc start, never mid-sweep.
+    float ca = cos(-start_angle);
+    float sa = sin(-start_angle);
+    float2 r = float2(rel.x * ca - rel.y * sa, rel.x * sa + rel.y * ca);
+    float angle = atan2(r.y, r.x);
+    if (angle < 0.0) angle += 6.28318531;  // map to [0, 2pi)
+    // Full-circle sweeps wrap; partial arcs clamp past their end (the old frac made the
+    // region beyond the arc wrap back to color_a, leaving a stray blob opposite the arc).
+    float full = sweep_angle >= 6.28 ? 1.0 : 0.0;
+    float t = full > 0.0 ? frac(angle / sweep_angle) : min(angle / sweep_angle, 1.0);
+    // Seam-free wrap: the last `blend` fraction of a full sweep fades back from color_b to
+    // color_a. Both the forward gradient and the fade-back use smoothstep (zero slope at
+    // both ends), so the color never reverses direction abruptly: linear segments made the
+    // 0 deg/360 deg junction read as visible bands. The epsilon keeps the divisor non-zero
+    // when blend == 0 (partial arcs: back stays 0).
+    float blend = full * 0.20;
+    float scale = 1.0 - blend;
+    float u = min(t / scale, 1.0);
+    float4 result = lerp(color_a, color_b, u * u * (3.0 - 2.0 * u));
+    float back = saturate((t - scale) / (blend + 1e-6));
+    back = back * back * (3.0 - 2.0 * back);
+    result = lerp(result, color_a, back);
     return result;
 })";
 

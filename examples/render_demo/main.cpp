@@ -126,31 +126,32 @@ public:
         }
 
         draw_section_label(ctx, theme, "Radial & Sweep", 70.0f);
-        const f32 radial_r = 16.0f;
+        const f32 radial_r = 80.0f;
         const RectF radial_rect = RectF::make(16.0f, 92.0f, radial_r * 2.0f, radial_r * 2.0f);
         ctx.fill_radial_gradient(Point{radial_rect.left + radial_r, radial_rect.top + radial_r},
                                  radial_r, palette[0], palette[5]);
         ctx.draw_border(radial_rect, theme.border, 1.0f, radial_r);
-        const RectF sweep_rect = RectF::make(b.width() - 88.0f, 92.0f, 64.0f, 40.0f);
+        const RectF sweep_rect = RectF::make(b.width() - 176.0f, 92.0f, 160.0f, 160.0f);
         ctx.fill_sweep_gradient(sweep_rect,
                                 Point{sweep_rect.left + sweep_rect.width() * 0.5f,
                                       sweep_rect.top + sweep_rect.height() * 0.5f},
                                 -1.5707963f, 6.2831853f, palette[0], palette[2], 4.0f);
         ctx.draw_border(sweep_rect, theme.border, 1.0f, 4.0f);
 
-        draw_section_label(ctx, theme, "Circles with shadows", 148.0f);
+        draw_section_label(ctx, theme, "Circles with shadows", 268.0f);
+        ctx.draw_text_small("Shadow blur falloff", RectF::make(180.0f, 270.0f, 200.0f, 18.0f),
+                            theme.text_secondary);
         const Color circle_shadow = theme.dark ? Color{0xFF, 0xFF, 0xFF, 180}
                                                : Color{0x00, 0x00, 0x00, 150};
         for (int i = 0; i < 3; ++i) {
-            const f32 cx = 46.0f + i * 72.0f;
-            const f32 cy = 192.0f;
+            const f32 cx = 218.0f + i * 72.0f;
+            const f32 cy = 340.0f;
             const f32 r = 20.0f - static_cast<f32>(i) * 4.0f;
             ctx.draw_shadow(RectF::make(cx - r, cy - r, r * 2.0f, r * 2.0f), r, 8.0f,
                             circle_shadow);
             ctx.fill_circle(Point{cx, cy}, r, theme.accent.with_alpha(200));
         }
 
-        draw_section_label(ctx, theme, "Shadow blur falloff", 268.0f);
         const Color falloff_shadow = theme.dark ? Color{0xFF, 0xFF, 0xFF, 200}
                                                 : Color{0x00, 0x00, 0x00, 160};
         const f32 blur_offsets[4] = {2.0f, 5.0f, 10.0f, 12.0f};
