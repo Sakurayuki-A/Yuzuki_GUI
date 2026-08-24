@@ -50,7 +50,7 @@ struct SecondWindow : Window {
             wchar_t exe_path[MAX_PATH] = {};
             GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
             const std::wstring dir(exe_path, wcsrchr(exe_path, L'\\') + 1);
-            backend().add_font_file(utf::to_utf8(dir + L"Satoshi-Regular.otf"));
+            backend().add_font_file(utf::to_utf8(dir + L"LexendDeca-Regular.ttf"));
             set_root(make_page());
         }
         show();

@@ -1,8 +1,9 @@
-// D2D backend: device / swap chain / render target / frame lifecycle.
+﻿// D2D backend: device / swap chain / render target / frame lifecycle.
 // Text, bitmaps, shapes, and effects live in d2d_text.cpp / d2d_bitmap.cpp / d2d_shapes.cpp / d2d_effects.cpp
 #include "d2d_backend.hpp"
 #include "d2d_internal.hpp"
 
+#include <chrono>
 #include <cmath>
 
 namespace yzk {
@@ -46,14 +47,34 @@ void D2DBackend::destroy_target() {
     blur_snapshot_.Reset();
     blur_snapshot_w_ = 0;
     blur_snapshot_h_ = 0;
+    blur_effect_.Reset();
+    sweep_snapshot_.Reset();
+    sweep_snapshot_w_ = 0;
+    sweep_snapshot_h_ = 0;
+    sweep_snapshot_dpi_ = 0;
     swap_chain_.Reset();
     device_.Reset();
     context_.Reset();
     brush_.Reset();
-    // Invalidate all device-bound caches to avoid dangling bitmaps.
+    // Everything else is bound to the dead context/device and must not leak into the
+    // next one (D2DERR_WRONG_RESOURCE_DOMAIN on the following EndDraw otherwise):
+    // clip layers, visual-transform layers, cached geometry, the sweep effect instance.
+    clip_layer_.Reset();
+    visual_layer_stack_.clear();
+    visual_layer_pool_.clear();
+    rounded_geometry_.Reset();
+    rounded_geometry_rect_ = D2D1_RECT_F{};
+    rounded_geometry_radius_ = 0.0f;
+    sweep_effect_impl_ = nullptr;
+    sweep_effect_.Reset();
+    // Invalidate all device-bound caches to avoid dangling bitmaps. Bitmap WIC sources
+    // are kept so the device-dependent ID2D1Bitmaps rebuild lazily on next use and
+    // BitmapIds stay valid across device loss.
     shadow_cache_.clear();
     pending_shadows_.clear();
-    bitmaps_.clear();
+    gradient_cache_.clear();
+    gradient_lru_.clear();
+    for (BitmapEntry& entry : bitmaps_) entry.bitmap.Reset();
 }
 
 bool D2DBackend::create_device() {
@@ -128,8 +149,6 @@ bool D2DBackend::create_swap_chain(void* native_window, u32 width_px, u32 height
             d3d_device_.Get(), static_cast<HWND>(native_window), &desc, nullptr, nullptr, &swap_chain_);
     }
     if (FAILED(hr)) return false;
-    flip_model_ = desc.SwapEffect == DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL ||
-                  desc.SwapEffect == DXGI_SWAP_EFFECT_FLIP_DISCARD;
 
     hr = dxgi_factory_->MakeWindowAssociation(static_cast<HWND>(native_window),
                                               DXGI_MWA_NO_ALT_ENTER);
@@ -157,9 +176,12 @@ bool D2DBackend::recreate_target() {
     hr = context_->CreateBitmapFromDxgiSurface(surface.Get(), &props, &target_bitmap_);
     if (FAILED(hr)) return false;
 
+    // 16-bit float intermediate: the whole compositing chain (content -> layer ->
+    // blur snapshot -> layer) accumulates in FP16 so soft gradients never quantize
+    // into visible bands; the only 8-bit step is the final Present to the swapchain.
     D2D1_BITMAP_PROPERTIES1 layer_props = D2D1::BitmapProperties1(
         D2D1_BITMAP_OPTIONS_TARGET,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+        D2D1::PixelFormat(DXGI_FORMAT_R16G16B16A16_FLOAT, D2D1_ALPHA_MODE_PREMULTIPLIED),
         static_cast<f32>(dpi_), static_cast<f32>(dpi_));
     hr = context_->CreateBitmap(D2D1::SizeU(width_px_, height_px_), nullptr, 0, layer_props,
                                 &layer_);
@@ -206,7 +228,6 @@ void D2DBackend::set_dpi(u32 dpi) {
 
 bool D2DBackend::begin_frame(const Color& clear, const RectF* clip_dip) {
     if (!context_ || !target_bitmap_ || !layer_ || drawing_) return false;
-    damage_rects_.clear();
     backdrop_regions_.clear();
     // Render deferred shadow bitmaps here, before BeginDraw: nested SetTarget +
     // BeginDraw/EndDraw inside a frame would produce blank bitmaps. Generate all
@@ -242,7 +263,6 @@ bool D2DBackend::begin_frame(const Color& clear, const RectF* clip_dip) {
 
 bool D2DBackend::begin_partial_frame(const Color& clear) {
     if (!context_ || !target_bitmap_ || !layer_ || drawing_) return false;
-    damage_rects_.clear();
     backdrop_regions_.clear();
     damage_clear_ = clear;
     drawing_ = true;
@@ -271,7 +291,6 @@ bool D2DBackend::begin_damage_rect(const RectF& rect) {
         D2D1_RECT_F fill = to_d2d(r);
         context_->FillRectangle(&fill, brush_.Get());
     }
-    damage_rects_.push_back(r);
     return true;
 }
 
@@ -296,10 +315,17 @@ bool D2DBackend::end_frame() {
 
     context_->SetTarget(target_bitmap_.Get());
     context_->SetTransform(D2D1::IdentityMatrix());
+    // Composite pass: layer_ -> swapchain buffer, full screen every frame. Timed so
+    // the offscreen-compositing cost is measured, not assumed (composite_ms_avg()).
+    const auto composite_t0 = std::chrono::steady_clock::now();
     context_->BeginDraw();
     context_->DrawImage(layer_.Get(), D2D1::Point2F(0.0f, 0.0f), D2D1_INTERPOLATION_MODE_LINEAR,
                         D2D1_COMPOSITE_MODE_SOURCE_OVER);
     hr = context_->EndDraw();
+    composite_ms_total_ +=
+        std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - composite_t0)
+            .count();
+    ++composite_count_;
     if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
         return handle_device_lost();
     }
@@ -323,32 +349,10 @@ bool D2DBackend::end_frame() {
         }
     }
 
-    // Partial redraw: Present1 uploads only the dirty rects (pixel coords); full frames or
-    // empty dirty lists use plain Present.
-    const f32 scale = dpi_ / 96.0f;
-    std::vector<RECT> dirty_px;
-    if (!damage_rects_.empty()) {
-        for (const RectF& r : damage_rects_) {
-            LONG l = static_cast<LONG>(std::floor(r.left * scale));
-            LONG t = static_cast<LONG>(std::floor(r.top * scale));
-            LONG rr = static_cast<LONG>(std::ceil(r.right * scale));
-            LONG b = static_cast<LONG>(std::ceil(r.bottom * scale));
-            l = l < 0 ? 0 : l;
-            t = t < 0 ? 0 : t;
-            rr = rr > static_cast<LONG>(width_px_) ? static_cast<LONG>(width_px_) : rr;
-            b = b > static_cast<LONG>(height_px_) ? static_cast<LONG>(height_px_) : b;
-            if (rr > l && b > t) dirty_px.push_back(RECT{l, t, rr, b});
-        }
-        damage_rects_.clear();
-    }
-    if (flip_model_ || dirty_px.empty()) {
-        hr = swap_chain_->Present(1, 0);
-    } else {
-        DXGI_PRESENT_PARAMETERS params = {};
-        params.DirtyRectsCount = static_cast<UINT>(dirty_px.size());
-        params.pDirtyRects = dirty_px.data();
-        hr = swap_chain_->Present1(1, 0, &params);
-    }
+    // Present: the layer_ framebuffer is copied to the swapchain in full every frame
+    // (FLIP_DISCARD gives no backbuffer persistence, so partial presents can never
+    // apply here — the dirty-rect policy lives entirely in the layer replay above).
+    hr = swap_chain_->Present(1, 0);
     if (hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET) {
         return handle_device_lost();
     }
@@ -426,3 +430,4 @@ bool D2DBackend::ensure_brush(const Color& color) {
 }
 
 }  // namespace yzk
+

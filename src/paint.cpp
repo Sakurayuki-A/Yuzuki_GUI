@@ -164,8 +164,8 @@ void PaintContext::replay(const RectF& damage_rect) {
                 backend_.fill_radial_gradient(cmd.p1, cmd.f1, cmd.color_a, cmd.color_b);
                 break;
             case PaintCommand::Type::FillSweepGradient:
-                backend_.fill_sweep_gradient(cmd.rect, cmd.p1, cmd.f1, cmd.f2, cmd.color_a,
-                                             cmd.color_b, cmd.f3);
+                backend_.fill_sweep_gradient_stops(cmd.rect, cmd.p1, cmd.f1, cmd.f2, cmd.stops,
+                                                   cmd.f3);
                 break;
             case PaintCommand::Type::DrawShadow:
                 backend_.draw_shadow(cmd.rect, cmd.f1, cmd.f2, cmd.color_a);
@@ -294,7 +294,22 @@ void PaintContext::fill_radial_gradient(const Point& center, f32 radius, const C
 void PaintContext::fill_sweep_gradient(const RectF& rect, const Point& center, f32 start_angle,
                                        f32 sweep_angle, const Color& color_a, const Color& color_b,
                                        f32 radius) const {
-    if (color_a.is_transparent() && color_b.is_transparent()) return;
+    fill_sweep_gradient_stops(rect, center, start_angle, sweep_angle,
+                              {{0.0f, color_a}, {1.0f, color_b}}, radius);
+}
+
+void PaintContext::fill_sweep_gradient_stops(const RectF& rect, const Point& center,
+                                             f32 start_angle, f32 sweep_angle,
+                                             const std::vector<GradientStop>& stops,
+                                             f32 radius) const {
+    bool all_transparent = true;
+    for (const GradientStop& s : stops) {
+        if (!s.color.is_transparent()) {
+            all_transparent = false;
+            break;
+        }
+    }
+    if (all_transparent) return;
     const RectF w = rect.translated(offset_x_, offset_y_);
     track(w);
     PaintCommand cmd;
@@ -304,8 +319,7 @@ void PaintContext::fill_sweep_gradient(const RectF& rect, const Point& center, f
     cmd.f1 = start_angle;
     cmd.f2 = sweep_angle;
     cmd.f3 = radius;
-    cmd.color_a = color_a;
-    cmd.color_b = color_b;
+    cmd.stops = stops;
     push_command(std::move(cmd));
 }
 

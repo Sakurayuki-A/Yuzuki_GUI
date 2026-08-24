@@ -15,7 +15,7 @@ constexpr f32 kShadowPadFactor = 2.5f;
 constexpr f32 kShadowGrid = 4.0f;
 
 struct FontSpec {
-    String family = "Satoshi";
+    String family = "Lexend Deca";
     f32 size = 14.0f;
     u16 weight = 400;
     bool italic = false;
@@ -77,6 +77,9 @@ public:
     virtual bool end_frame() = 0;
     // True if deferred resources (e.g. shadow maps) became ready this frame and need one more repaint to show.
     virtual bool shadows_pending_after_frame() const { return false; }
+    // Average wall time of the layer->swapchain composite pass (ms), or -1 if the
+    // backend doesn't measure it. Diagnostic for the offscreen-compositing cost.
+    virtual f64 composite_ms_avg() const { return -1.0; }
 
     // Partial redraw: begin_partial_frame starts a session (no full-screen clear), then
     // begin_damage_rect/end_damage_rect per dirty rect (fill background, then draw with GPU
@@ -109,6 +112,11 @@ public:
     virtual FontId create_font(const FontSpec& spec) = 0;
     virtual bool add_font_file(const String& path) = 0;
     virtual BitmapId load_bitmap(const String& path) = 0;
+    // Releases the bitmap's resources (device bitmap + decoded source). The id becomes
+    // invalid; drawing or sizing it afterwards is a no-op.
+    virtual void unload_bitmap(BitmapId id) {
+        (void)id;
+    }
     virtual Size bitmap_size(BitmapId id) const = 0;
     virtual void draw_bitmap(BitmapId id, const RectF& rect, f32 radius = 0.0f) = 0;
     virtual Size measure_text(FontId font, const String& text, f32 max_width) = 0;
@@ -151,6 +159,19 @@ public:
     virtual void fill_sweep_gradient(const RectF& rect, const Point& center, f32 start_angle,
                                      f32 sweep_angle, const Color& color_a, const Color& color_b,
                                      f32 radius = 0.0f) = 0;
+    // Sweep gradient with explicit stops (positions in [0,1], interpolated piecewise
+    // linearly). Up to 8 stops; extras are ignored, unsorted input is sorted.
+    virtual void fill_sweep_gradient_stops(const RectF& rect, const Point& center,
+                                           f32 start_angle, f32 sweep_angle,
+                                           const std::vector<GradientStop>& stops,
+                                           f32 radius = 0.0f) {
+        (void)rect;
+        (void)center;
+        (void)start_angle;
+        (void)sweep_angle;
+        (void)stops;
+        (void)radius;
+    }
     virtual void draw_shadow(const RectF& rect, f32 radius, f32 blur, const Color& color) = 0;
     virtual bool draw_backdrop_blur(const RectF& rect, f32 blur, const Color& tint,
                                     f32 radius) = 0;

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <yuzuki/core/encoding.hpp>
 #include <yuzuki/render/backend.hpp>
 
@@ -36,6 +36,9 @@ public:
 
     bool begin_frame(const Color& clear, const RectF* clip_dip) override;
     bool end_frame() override;
+    f64 composite_ms_avg() const override {
+        return composite_count_ ? composite_ms_total_ / static_cast<f64>(composite_count_) : -1.0;
+    }
     bool begin_partial_frame(const Color& clear) override;
     bool begin_damage_rect(const RectF& rect) override;
     void end_damage_rect() override;
@@ -48,6 +51,7 @@ public:
     FontId create_font(const FontSpec& spec) override;
     bool add_font_file(const String& path) override;
     BitmapId load_bitmap(const String& path) override;
+    void unload_bitmap(BitmapId id) override;
     Size bitmap_size(BitmapId id) const override;
     void draw_bitmap(BitmapId id, const RectF& rect, f32 radius) override;
     Size measure_text(FontId font, const String& text, f32 max_width) override;
@@ -68,6 +72,9 @@ public:
     void fill_sweep_gradient(const RectF& rect, const Point& center, f32 start_angle,
                              f32 sweep_angle, const Color& color_a, const Color& color_b,
                              f32 radius) override;
+    void fill_sweep_gradient_stops(const RectF& rect, const Point& center, f32 start_angle,
+                                   f32 sweep_angle, const std::vector<GradientStop>& stops,
+                                   f32 radius) override;
     void draw_shadow(const RectF& rect, f32 radius, f32 blur, const Color& color) override;
     bool draw_backdrop_blur(const RectF& rect, f32 blur, const Color& tint, f32 radius) override;
     void draw_border(const RectF& rect, const Color& color, f32 width, f32 radius) override;
@@ -82,12 +89,57 @@ private:
     bool handle_device_lost();
     bool ensure_brush(const Color& color);
     bool ensure_sweep_effect();
+    // Cached gaussian-blur effect for backdrop blur (created once per device).
+    bool ensure_blur_effect();
     struct CachedShadow;
     bool render_shadow_bitmap(f32 width, f32 height, f32 radius, f32 blur);
-    const CachedShadow* find_shadow(f32 width, f32 height, f32 radius, f32 blur) const;
+    CachedShadow* find_shadow(f32 width, f32 height, f32 radius, f32 blur);
     bool get_layout(FontId font, const std::wstring& wide, f32 width, f32 height,
                     Microsoft::WRL::ComPtr<IDWriteTextLayout>* out_layout,
                     DWRITE_TEXT_METRICS* out_metrics);
+    // Hit-testing / caret / selection layout: wraps at the REAL content height (read
+    // back from metrics) instead of a fake 1e7 box, so is-inside and clamping semantics
+    // match the drawn text for multi-line (CJK) content.
+    bool get_hit_layout(FontId font, const std::wstring& wide, f32 width,
+                        Microsoft::WRL::ComPtr<IDWriteTextLayout>* out_layout);
+
+    // ===== Gradient brush cache (P1) =====
+    // Brushes are created in origin-relative space and positioned per draw via
+    // SetTransform(translation), so one cached brush serves every rect of the same
+    // extent + color pair. LRU-bounded; cleared on device loss.
+    struct GradientCacheKey {
+        u8 kind = 0;  // 0 = linear vertical, 1 = linear horizontal, 2 = radial
+        f32 extent = 0.0f;  // gradient length: rect height / width / radius
+        Color color_a{};
+        Color color_b{};
+
+        bool operator<(const GradientCacheKey& o) const {
+            if (kind != o.kind) return kind < o.kind;
+            if (extent != o.extent) return extent < o.extent;
+            if (color_a.r != o.color_a.r || color_a.g != o.color_a.g ||
+                color_a.b != o.color_a.b || color_a.a != o.color_a.a) {
+                return (color_a.r != o.color_a.r)
+                           ? color_a.r < o.color_a.r
+                           : (color_a.g != o.color_a.g)
+                                 ? color_a.g < o.color_a.g
+                                 : (color_a.b != o.color_a.b) ? color_a.b < o.color_a.b
+                                                              : color_a.a < o.color_a.a;
+            }
+            return (color_b.r != o.color_b.r)
+                       ? color_b.r < o.color_b.r
+                       : (color_b.g != o.color_b.g)
+                             ? color_b.g < o.color_b.g
+                             : (color_b.b != o.color_b.b) ? color_b.b < o.color_b.b
+                                                          : color_b.a < o.color_b.a;
+        }
+    };
+    struct GradientCacheEntry {
+        Microsoft::WRL::ComPtr<ID2D1GradientStopCollection> stops;
+        Microsoft::WRL::ComPtr<ID2D1Brush> brush;
+        std::list<GradientCacheKey>::iterator lru;
+    };
+    // Returns nullptr on failure; keeps the entry MRU-fresh.
+    ID2D1Brush* ensure_gradient(const GradientCacheKey& key);
 
     struct TextLayoutKey {
         FontId font = 0;
@@ -110,13 +162,16 @@ private:
     };
 
     // Shadow bitmap cache, keyed by (rect size, radius, blur). Bitmaps are drawn 1:1
-    // (no stretch) so corner proportions stay undistorted.
+    // (no stretch) so corner proportions stay undistorted. LRU: last_use carries a
+    // monotonic tick; eviction drops the least recently used entry instead of
+    // clearing the whole cache.
     struct CachedShadow {
         Microsoft::WRL::ComPtr<ID2D1Bitmap1> bitmap;
         f32 width = 0.0f;
         f32 height = 0.0f;
         f32 radius = 0.0f;
         f32 blur = 0.0f;
+        u64 last_use = 0;
     };
 
     // Deferred shadow generation request: registered during the frame, rendered before the next
@@ -130,6 +185,8 @@ private:
 
     // True if end_frame generated shadow bitmaps that need an immediate repaint to appear.
     bool shadows_pending_after_frame() const { return shadow_work_done_; }
+    f64 composite_ms_total_ = 0.0;  // layer->swapchain composite pass, cumulative wall ms
+    u64 composite_count_ = 0;
     // Backdrop blur snapshot regions (window DIPs); a dirty rect intersecting one must be repainted in full.
     const std::vector<RectF>& backdrop_regions() const { return backdrop_regions_; }
 
@@ -141,7 +198,6 @@ private:
     bool clip_pushed_ = false;
     bool shadow_work_done_ = false;
     // Partial redraw: this frame's dirty rects (DIPs, inflated for AA edges), used as Present1 dirty rectangles.
-    std::vector<RectF> damage_rects_;
     Color damage_clear_{0, 0, 0, 0};
 
     // Backdrop blur snapshot regions (window DIPs, with a 3*blur margin). The snapshot reads
@@ -155,16 +211,27 @@ private:
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> context_;
     Microsoft::WRL::ComPtr<IDXGISwapChain1> swap_chain_;
     Microsoft::WRL::ComPtr<IDXGIFactory2> dxgi_factory_;
-    bool flip_model_ = false;  // FLIP-model swap chains don't support Present1 dirty-rect submission.
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> target_bitmap_;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> layer_;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush_;
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> blur_snapshot_;
     u32 blur_snapshot_w_ = 0;
     u32 blur_snapshot_h_ = 0;
+    Microsoft::WRL::ComPtr<ID2D1Effect> blur_effect_;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap1> sweep_snapshot_;
+    u32 sweep_snapshot_w_ = 0;
+    u32 sweep_snapshot_h_ = 0;
+    u32 sweep_snapshot_dpi_ = 0;
 
     Microsoft::WRL::ComPtr<IDWriteFactory> dwrite_;
     Microsoft::WRL::ComPtr<IDWriteFontCollection> font_collection_;
+    // All font files registered so far; the collection is rebuilt from this list on
+    // every add_font_file so files accumulate instead of replacing each other.
+    struct FontFileEntry {
+        WString path;
+        Microsoft::WRL::ComPtr<IDWriteFontFile> file;
+    };
+    std::vector<FontFileEntry> font_files_;
     std::vector<Microsoft::WRL::ComPtr<IDWriteTextFormat>> fonts_;
     std::map<FontSpec, FontId> font_cache_;
     std::map<TextLayoutKey, TextLayoutEntry> layout_cache_;
@@ -172,9 +239,24 @@ private:
     std::list<TextLayoutKey> lru_order_;
     std::vector<CachedShadow> shadow_cache_;
     std::vector<ShadowRequest> pending_shadows_;
+    u64 shadow_lru_tick_ = 0;  // monotonic stamp for shadow cache LRU
+
+    std::map<GradientCacheKey, GradientCacheEntry> gradient_cache_;
+    std::list<GradientCacheKey> gradient_lru_;
 
     Microsoft::WRL::ComPtr<IWICImagingFactory> wic_factory_;
-    std::vector<Microsoft::WRL::ComPtr<ID2D1Bitmap>> bitmaps_;
+    // Bitmaps survive device loss: the WIC source is kept so the device-dependent
+    // ID2D1Bitmap can be rebuilt lazily on the next draw; BitmapIds stay valid.
+    struct BitmapEntry {
+        Microsoft::WRL::ComPtr<IWICBitmapSource> source;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+        Size dip_size{};  // cached at load; queryable without a live device
+
+        bool empty() const { return !source && !bitmap; }
+    };
+    std::vector<BitmapEntry> bitmaps_;
+    // Recreates the device bitmap from its WIC source if needed; nullptr if unavailable.
+    ID2D1Bitmap* ensure_bitmap(u32 index);
     Microsoft::WRL::ComPtr<ID2D1Layer> clip_layer_;
     // Visual transform stack (saved by push_visual, restored by pop_visual) and opacity layer stack.
     std::vector<D2D1_MATRIX_3X2_F> visual_transform_stack_;

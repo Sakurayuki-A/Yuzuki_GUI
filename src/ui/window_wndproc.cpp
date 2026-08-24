@@ -6,6 +6,7 @@
 #include "window_internal.hpp"
 
 #include <windowsx.h>
+#include <imm.h>
 
 namespace yzk {
 
@@ -155,6 +156,25 @@ LRESULT CALLBACK Window::wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
         case WM_KEYUP:
             if (self) self->on_key(msg, static_cast<u32>(wparam), static_cast<u16>(0),
                                    map_mods(), (lparam & 0x40000000) != 0);
+            return 0;
+
+        // ===== IME =====
+        // Composition is drawn inline by the focused widget; the system pre-edit
+        // window is suppressed while the candidate list stays system-drawn, anchored
+        // at the caret by refresh_ime_anchor().
+        case WM_IME_SETCONTEXT:
+            return DefWindowProcW(hwnd, msg, wparam, lparam & ~ISC_SHOWUICOMPOSITIONWINDOW);
+
+        case WM_IME_STARTCOMPOSITION:
+            if (self) self->refresh_ime_anchor();
+            return 0;
+
+        case WM_IME_COMPOSITION:
+            if (self) self->on_ime_composition(static_cast<u32>(lparam));
+            return 0;
+
+        case WM_IME_ENDCOMPOSITION:
+            if (self) self->on_ime_end_composition();
             return 0;
 
         case WM_TIMER: {

@@ -95,6 +95,11 @@ public:
     // is destroyed, so the window never dispatches to a dangling widget.
     void detach_widget(Widget* widget);
 
+    // ===== IME =====
+    // Re-anchors the system composition/candidate windows at the focused widget's
+    // caret. Call after caret moves or text changes during composition.
+    void refresh_ime_anchor();
+
 private:
     void kill_all_timers();
     void tick_animations();
@@ -110,6 +115,14 @@ private:
     // Starts a manual drag/resize gesture: records window rect + cursor origin and
     // captures; WM_MOUSEMOVE drives SetWindowPos until button release
     void start_gesture(int zone);
+    // Enables/disables the input method context for the focused widget (password
+    // fields opt out via wants_ime() == false).
+    void apply_ime_focus();
+    // WM_IME_COMPOSITION: reads GCS_RESULTSTR (commit) / GCS_COMPSTR + GCS_CURSORPOS
+    // (pre-edit) and dispatches ImeCommit / ImeCompose to the focused widget.
+    void on_ime_composition(u32 flags);
+    // WM_IME_ENDCOMPOSITION: clears any leftover composition display (cancel path).
+    void on_ime_end_composition();
 
     Widget* hit_test(f32 x, f32 y);
     void dispatch(Widget* target, Event& e);
@@ -169,6 +182,11 @@ private:
     f32 last_anim_frame_ms_ = 0.0f;
     f32 last_frame_ms_ = 0.0f;
     FrameStats frame_stats_;
+
+    // ===== IME state =====
+    void* ime_prev_context_ = nullptr;  // HIMC saved while IME is disabled
+    bool ime_disabled_ = false;
+    WString ime_text_buffer_;           // payload storage; valid during event dispatch
 };
 
 using WindowList = std::vector<Window*>;

@@ -21,7 +21,6 @@ FontId text_box_font(Window* win) {
 
 constexpr f32 kPadding = 6.0f;
 constexpr f32 kLineHeight = 20.0f;
-constexpr f32 kToggleWidth = 28.0f;
 
 bool clipboard_set_text(const WString& text) {
     if (!OpenClipboard(nullptr)) return false;
@@ -59,8 +58,7 @@ WString clipboard_get_text() {
 }
 }  // namespace
 
-TextBox::TextBox(String text, TextBoxConfig config)
-    : config_(config), reveal_(config.reveal_password) {
+TextBox::TextBox(String text, TextBoxConfig config) : config_(config) {
     text_ = utf::to_wide(text);
     cursor_ = static_cast<u32>(text_.size());
     sel_start_ = cursor_;
@@ -70,7 +68,6 @@ TextBox::TextBox(String text, TextBoxConfig config)
 
 void TextBox::set_config(const TextBoxConfig& config) {
     config_ = config;
-    reveal_ = config.reveal_password;
     invalidate();
 }
 
@@ -106,7 +103,7 @@ Size TextBox::measure_impl(Size available, const PaintContext* ctx) {
 }
 
 WString TextBox::display_text() const {
-    if (config_.mode != TextBoxMode::Password || reveal_) return text_;
+    if (config_.mode != TextBoxMode::Password) return text_;
     WString masked;
     masked.reserve(text_.size());
     for (const wchar_t c : text_) {
@@ -152,14 +149,17 @@ void TextBox::paint_impl(PaintContext& ctx) {
     ctx.draw_border(b, focused_ ? theme.accent : theme.border, 1.0f, theme.corner_radius);
 
     const bool password = config_.mode == TextBoxMode::Password;
-    const bool show_toggle = password && config_.show_password_toggle;
-    const f32 right_inset = show_toggle ? kToggleWidth + kPadding : 0.0f;
 
     const WString shown = display_text();
-    const bool empty = shown.empty();
-    const WString prefix = empty ? WString() : shown.substr(0, cursor_);
+    // Live IME pre-edit is displayed inserted at the caret (password never composes).
+    const bool composing = !composition_.empty();
+    const u32 comp_caret = cursor_ + composition_cursor_;
+    WString visible = shown;
+    if (composing) visible.insert(cursor_, composition_);
+    const bool empty = visible.empty();
+    const WString prefix = empty ? WString() : visible.substr(0, comp_caret);
 
-    const RectF text_rect = RectF::make(b.left + kPadding, b.top, b.width() - kPadding * 2.0f - right_inset - content_inset_, b.height());
+    const RectF text_rect = RectF::make(b.left + kPadding, b.top, b.width() - kPadding * 2.0f - content_inset_, b.height());
     const Color color = empty ? theme.text_disabled : theme.text;
 
     if (config_.mode == TextBoxMode::MultiLine) {
@@ -178,7 +178,7 @@ void TextBox::paint_impl(PaintContext& ctx) {
     const RectF draw_rect = RectF::make(text_rect.left + ox,
                                         multiline ? b.top + kPadding : text_rect.top,
                                         draw_w, text_rect.height());
-    if (password && !reveal_ && !empty) {
+    if (password && !empty) {
         const WString masked = shown;
         const f32 cy = text_rect.top + text_rect.height() * 0.5f;
         for (u32 i = 0; i < masked.size(); ++i) {
@@ -188,8 +188,27 @@ void TextBox::paint_impl(PaintContext& ctx) {
             ctx.fill_circle(Point{cx, cy}, w * 0.42f, color);
         }
     } else {
-        ctx.draw_text(empty ? placeholder_ : utf::to_utf8(shown), draw_rect, color,
+        ctx.draw_text(empty ? placeholder_ : utf::to_utf8(visible), draw_rect, color,
                       TextAlignH::Left, multiline ? TextAlignV::Top : TextAlignV::Center);
+    }
+
+    // IME pre-edit underline spanning the composition span.
+    if (composing) {
+        if (Window* win = window()) {
+            const FontId font = text_box_font(win);
+            const Point p0 = win->backend().caret_position(
+                font, utf::to_utf8(visible), draw_w, static_cast<i32>(cursor_));
+            const Point p1 = win->backend().caret_position(
+                font, utf::to_utf8(visible), draw_w,
+                static_cast<i32>(cursor_ + static_cast<u32>(composition_.size())));
+            const f32 uy = multiline ? b.top + kPadding + p0.y + line_height() - 2.0f
+                                     : b.top + (b.height() - line_height()) / 2.0f +
+                                           line_height() - 2.0f;
+            f32 ux0 = text_rect.left + ox + p0.x;
+            f32 ux1 = text_rect.left + ox + p1.x;
+            if (ux1 < ux0) ux1 = ux0 + 1.0f;
+            ctx.fill_rect(RectF::make(ux0, uy, ux1 - ux0, 2.0f), theme.accent);
+        }
     }
 
     const u32 sel_begin = selection_begin();
@@ -218,14 +237,14 @@ void TextBox::paint_impl(PaintContext& ctx) {
         if (multiline) {
             if (Window* win = window()) {
                 const Point cp = win->backend().caret_position(
-                    text_box_font(win), utf::to_utf8(text_), text_rect.width(),
-                    static_cast<i32>(cursor_));
+                    text_box_font(win), utf::to_utf8(visible), text_rect.width(),
+                    static_cast<i32>(comp_caret));
                 caret_x = text_rect.left + ox + cp.x;
                 caret_y = b.top + kPadding + cp.y;
             }
         } else {
             const u32 start = line_start(line_index_at(cursor_));
-            const WString line_prefix = shown.substr(start, cursor_ - start);
+            const WString line_prefix = visible.substr(start, comp_caret - start);
             caret_x = text_rect.left + ox +
                       (line_prefix.empty() ? 0.0f : ctx.measure_text(utf::to_utf8(line_prefix)).width);
             caret_y = b.top + (b.height() - line_height()) / 2.0f;
@@ -234,19 +253,6 @@ void TextBox::paint_impl(PaintContext& ctx) {
         ctx.fill_rect(RectF::make(caret_xr, caret_y + 3.0f, 2.0f, line_height() - 6.0f), theme.accent);
     }
     ctx.pop_clip();
-
-    if (show_toggle) {
-        const RectF toggle_rect = RectF::make(b.right - kPadding - kToggleWidth, b.top, kToggleWidth, b.height());
-        const Point c = Point{toggle_rect.left + kToggleWidth / 2.0f, toggle_rect.top + toggle_rect.height() / 2.0f};
-        if (reveal_) {
-            ctx.fill_circle(c, 5.5f, theme.text.with_alpha(110));
-            ctx.fill_circle(c, 2.5f, theme.text.with_alpha(190));
-            ctx.draw_line(Point{c.x - 4.0f, c.y - 4.0f}, Point{c.x + 4.0f, c.y + 4.0f}, theme.text, 1.5f);
-        } else {
-            ctx.fill_circle(c, 5.5f, theme.text.with_alpha(110));
-            ctx.fill_circle(c, 2.5f, theme.text.with_alpha(190));
-        }
-    }
 }
 
 void TextBox::on_event(Event& e) {
@@ -260,6 +266,8 @@ void TextBox::on_event(Event& e) {
 
         case EventType::FocusLost:
             focused_ = false;
+            composition_.clear();
+            composition_cursor_ = 0;
             if (Window* win = window()) win->stop_timer(this);
             invalidate();
             break;
@@ -272,15 +280,6 @@ void TextBox::on_event(Event& e) {
             if (e.data.mouse.buttons & MouseButton_Left) {
                 if (Window* win = window()) win->set_focus(this);
                 const Point p = to_local(this, e.data.mouse.x, e.data.mouse.y);
-                if (config_.mode == TextBoxMode::Password && config_.show_password_toggle) {
-                    const RectF toggle_rect = RectF::make(bounds_.right - kPadding - kToggleWidth, bounds_.top, kToggleWidth, bounds_.height());
-                    if (toggle_rect.contains(p.x, p.y)) {
-                        reveal_ = !reveal_;
-                        invalidate();
-                        e.consumed = true;
-                        break;
-                    }
-                }
                 sel_start_ = 0;
                 cursor_ = 0;
                 set_cursor_by_pos(p.x, p.y);
@@ -307,7 +306,20 @@ void TextBox::on_event(Event& e) {
 
         case EventType::Character:
             if (!focused_ || config_.read_only) break;
-            if (e.data.key.chr == '\r' || e.data.key.chr == '\n') {
+            // While an IME composition is live the IME owns the text stream; raw
+            // characters would double-insert.
+            if (!composition_.empty()) {
+                e.consumed = true;
+                break;
+            }
+            // Enter is handled in KeyDown (VK_RETURN) which already inserts the
+            // newline; TranslateMessage delivers WM_CHAR '\r' for the same press —
+            // ignoring it here prevents double newlines.
+            if (e.data.key.chr == L'\r') {
+                e.consumed = true;
+                break;
+            }
+            if (e.data.key.chr == '\n') {
                 if (config_.mode == TextBoxMode::MultiLine) {
                     if (sel_start_ != cursor_) delete_selection();
                     if (text_.size() < config_.max_length) {
@@ -329,8 +341,48 @@ void TextBox::on_event(Event& e) {
             e.consumed = true;
             break;
 
+        case EventType::ImeCompose:
+            e.consumed = true;
+            if (!focused_) break;
+            {
+                const WString incoming(e.data.ime.text ? e.data.ime.text : L"",
+                                       e.data.ime.length);
+                if (incoming.empty()) {
+                    // Cancelled / fully converted: clear the pre-edit display.
+                    composition_.clear();
+                    composition_cursor_ = 0;
+                    invalidate();
+                    break;
+                }
+                if (config_.read_only) break;
+                // A new composition replaces the current selection when committed.
+                if (composition_.empty() && sel_start_ != cursor_) delete_selection();
+                composition_ = incoming;
+                composition_cursor_ = e.data.ime.cursor > composition_.size()
+                                          ? static_cast<u32>(composition_.size())
+                                          : e.data.ime.cursor;
+                invalidate();
+                if (Window* win = window()) win->refresh_ime_anchor();
+            }
+            break;
+
+        case EventType::ImeCommit:
+            e.consumed = true;
+            composition_.clear();
+            composition_cursor_ = 0;
+            if (!focused_ || config_.read_only) break;
+            insert_text(WString(e.data.ime.text ? e.data.ime.text : L"", e.data.ime.length));
+            invalidate();
+            break;
+
         case EventType::KeyDown: {
             if (!focused_) break;
+            // While composing, the IME owns the keyboard: navigation/selection keys
+            // would desync the visual caret from the pre-edit insertion point.
+            if (!composition_.empty()) {
+                e.consumed = true;
+                break;
+            }
             caret_visible_ = true;
             const bool ctrl = (e.data.key.mods & KeyModifier_Control) != 0;
             const bool shift = (e.data.key.mods & KeyModifier_Shift) != 0;
@@ -479,10 +531,20 @@ void TextBox::move_cursor_vertical(i32 delta_line) {
     Window* win = window();
     if (!win) return;
     const FontId font = text_box_font(win);
-    const f32 width = bounds_.width() - kPadding * 2.0f;
+    // Same wrap width as painting (text_rect minus inset), or hit-testing wraps differently.
+    const f32 width = bounds_.width() - kPadding * 2.0f - content_inset_;
     const Point cp = win->backend().caret_position(font, utf::to_utf8(text_), width,
                                                    static_cast<i32>(cursor_));
-    const f32 target_y = cp.y + static_cast<f32>(delta_line) * line_height();
+    // Real line height from the loaded font: fixed kLineHeight drifts per line with CJK
+    // fallback fonts (taller ascent/descent), so up/down skips or sticks after a few lines.
+    const f32 measured_lh = win->backend().measure_text(font, "Wg", 1e7f).height;
+    const f32 line_h = measured_lh > 1.0f ? measured_lh : line_height();
+    f32 target_y = cp.y + static_cast<f32>(delta_line) * line_h;
+    // Clamp into the wrapped content so moving past the first/last line sticks there
+    // instead of landing on a clamped nearest cluster in an out-of-range row.
+    const f32 content_h = win->backend().measure_text(font, utf::to_utf8(text_), width).height;
+    if (target_y < 0.0f) target_y = 0.0f;
+    if (content_h > 0.0f && target_y > content_h) target_y = content_h;
     i32 index = win->backend().hit_test_text(font, utf::to_utf8(text_), width, cp.x, target_y);
     if (index < 0) index = 0;
     if (index > static_cast<i32>(text_.size())) index = static_cast<i32>(text_.size());
@@ -497,8 +559,11 @@ void TextBox::set_cursor_by_pos(f32 x, f32 y) {
         const FontId font = text_box_font(win);
         const f32 lx = x - kPadding;
         const f32 ly = y - kPadding;
+        // Same wrap width as painting, so the clicked line breaks match what is drawn.
         i32 index = win->backend().hit_test_text(font, utf::to_utf8(text_),
-                                                 bounds_.width() - kPadding * 2.0f, lx, ly);
+                                                 bounds_.width() - kPadding * 2.0f -
+                                                     content_inset_,
+                                                 lx, ly);
         if (index < 0) index = 0;
         if (index > static_cast<i32>(text_.size())) index = static_cast<i32>(text_.size());
         cursor_ = static_cast<u32>(index);
@@ -529,6 +594,38 @@ void TextBox::delete_backward() {
     text_.erase(cursor_, n);
     sel_start_ = cursor_;
     invalidate();
+}
+
+void TextBox::insert_text(const WString& text) {
+    if (sel_start_ != cursor_) delete_selection();
+    for (const wchar_t c : text) {
+        if (text_.size() >= config_.max_length) break;
+        if (config_.mode != TextBoxMode::MultiLine && c == L'\n') continue;
+        text_.insert(cursor_, 1, c);
+        ++cursor_;
+    }
+    sel_start_ = cursor_;
+}
+
+RectF TextBox::ime_caret_rect() const {
+    Window* win = window();
+    if (!win || !focused_) return RectF{};
+    const RectF g = global_bounds();
+    const bool multiline = config_.mode == TextBoxMode::MultiLine;
+    // The anchor sits at the in-composition caret: display string with the live
+    // pre-edit inserted, caret index extended by the composition cursor offset.
+    WString visible = display_text();
+    if (!composition_.empty()) visible.insert(cursor_, composition_);
+    const f32 lay_w =
+        multiline ? g.width() - kPadding * 2.0f - content_inset_ : 1e7f;
+    const FontId font = text_box_font(win);
+    const Point cp = win->backend().caret_position(
+        font, utf::to_utf8(visible), lay_w,
+        static_cast<i32>(cursor_ + composition_cursor_));
+    const f32 x = g.left + kPadding - scroll_offset_ + cp.x;
+    const f32 y = multiline ? g.top + kPadding + cp.y
+                            : g.top + (g.height() - line_height()) / 2.0f;
+    return RectF::make(x, y, 2.0f, line_height());
 }
 
 void TextBox::delete_selection() {

@@ -62,7 +62,7 @@ target_include_directories(yuzuki PUBLIC
 
 target_compile_features(yuzuki PUBLIC cxx_std_17)
 
-target_link_libraries(yuzuki PUBLIC d2d1 dwrite dxgi d3d11 d3dcompiler winmm)
+target_link_libraries(yuzuki PUBLIC d2d1 dwrite dxgi d3d11 d3dcompiler winmm imm32)
 
 if(MSVC)
     target_compile_options(yuzuki PRIVATE /W4 /permissive- /utf-8 /EHsc)

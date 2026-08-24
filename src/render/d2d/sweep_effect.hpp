@@ -11,15 +11,19 @@ namespace yzk {
 constexpr GUID kSweepGradientClsid = {
     0x0f8f2a5c, 0x9b3a, 0x4e7d, {0xa1, 0xc6, 0x5d, 0x2e, 0x8b, 0x44, 0xf7, 0x90}};
 
+// Max stops the sweep shader interpolates (cbuffer-sized; extra input stops are clamped).
+constexpr u32 kMaxSweepStops = 8;
+
 struct SweepParams {
     D2D1_POINT_2F center;
     D2D1_SIZE_F size;
     f32 start_angle;
     f32 sweep_angle;
-    f32 unused;
-    f32 pad;  // keep float4 16-byte aligned (matches HLSL cbuffer layout)
-    D2D1_COLOR_F color_a;
-    D2D1_COLOR_F color_b;
+    f32 stop_count;  // as float: 1..kMaxSweepStops
+    f32 pad;         // keep float4 16-byte aligned (matches HLSL cbuffer layout)
+    D2D1_COLOR_F colors[kMaxSweepStops];
+    // Stop positions packed 4-per-float4 (x,y,z,w) to respect cbuffer packing rules.
+    D2D1_COLOR_F positions_packed[kMaxSweepStops / 4];
 };
 
 // Custom interface to set gradient parameters without XML property plumbing.

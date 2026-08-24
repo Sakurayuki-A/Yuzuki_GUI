@@ -13,8 +13,6 @@ enum class TextBoxMode : u8 {
 
 struct TextBoxConfig {
     TextBoxMode mode = TextBoxMode::SingleLine;
-    bool show_password_toggle = true;
-    bool reveal_password = false;
     bool read_only = false;
     u32 max_length = 4096;
     f32 height = 32.0f;
@@ -45,6 +43,11 @@ public:
     void paint_impl(PaintContext& ctx) override;
     void on_event(Event& e) override;
 
+    // ===== IME =====
+    // Composition input for SingleLine / MultiLine; password fields opt out entirely.
+    bool wants_ime() const override { return config_.mode != TextBoxMode::Password; }
+    RectF ime_caret_rect() const override;
+
 private:
     void move_cursor(i32 delta);
     void move_cursor_vertical(i32 delta_line);
@@ -55,6 +58,7 @@ private:
     void copy_selection() const;
     void cut_selection();
     void paste_from_clipboard();
+    void insert_text(const WString& text);
     u32 selection_begin() const { return cursor_ < sel_start_ ? cursor_ : sel_start_; }
     u32 selection_end() const { return cursor_ < sel_start_ ? sel_start_ : cursor_; }
 
@@ -67,7 +71,6 @@ private:
     WString text_;
     String placeholder_;
     TextBoxConfig config_;
-    bool reveal_ = false;
     u32 cursor_ = 0;
     u32 sel_start_ = 0;
     bool focused_ = false;
@@ -75,6 +78,10 @@ private:
     bool selecting_ = false;
     f32 scroll_offset_ = 0.0f;
     f32 content_inset_ = 0.0f;
+
+    // Live IME pre-edit string displayed (virtually) at cursor_; cleared on commit/cancel.
+    WString composition_;
+    u32 composition_cursor_ = 0;
 };
 
 }  // namespace yzk

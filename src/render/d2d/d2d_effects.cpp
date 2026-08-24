@@ -13,12 +13,15 @@ void D2DBackend::draw_shadow(const RectF& rect, f32 radius, f32 blur, const Colo
     // Skip when alpha is too low to be visible, avoiding wasted bitmap generation during fade-in animations.
     if (color.a < 8) return;
 
-    // Quantize the cache key to the grid so small per-frame size changes reuse the same bitmap.
-    const f32 qw = std::round(rect.width() / kShadowGrid) * kShadowGrid;
-    const f32 qh = std::round(rect.height() / kShadowGrid) * kShadowGrid;
+    // Quantize the cache key to a grid so small per-frame size changes reuse the same
+    // bitmap. The grid adapts to blur: soft shadows hide the stretch, crisp ones don't —
+    // a fixed 4 DIP grid made shadows step visibly while controls animated their size.
+    const f32 grid = std::max(1.0f, std::min(kShadowGrid, blur * 0.5f));
+    const f32 qw = std::round(rect.width() / grid) * grid;
+    const f32 qh = std::round(rect.height() / grid) * grid;
     if (qw <= 0.0f || qh <= 0.0f) return;
 
-    const CachedShadow* cached = find_shadow(qw, qh, radius, blur);
+    CachedShadow* cached = find_shadow(qw, qh, radius, blur);
     if (!cached) {
         // First frame: only register the request; generation is deferred to end_frame
         // (avoiding a hitch from generating all shadows within one frame).
@@ -44,12 +47,13 @@ void D2DBackend::draw_shadow(const RectF& rect, f32 radius, f32 blur, const Colo
     context_->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 }
 
-const D2DBackend::CachedShadow* D2DBackend::find_shadow(f32 width, f32 height, f32 radius,
-                                                        f32 blur) const {
-    for (const CachedShadow& cached : shadow_cache_) {
+D2DBackend::CachedShadow* D2DBackend::find_shadow(f32 width, f32 height, f32 radius, f32 blur) {
+    for (CachedShadow& cached : shadow_cache_) {
         if (cached.width == width && cached.height == height && cached.radius == radius &&
-            cached.blur == blur)
+            cached.blur == blur) {
+            cached.last_use = ++shadow_lru_tick_;
             return &cached;
+        }
     }
     return nullptr;
 }
@@ -125,9 +129,17 @@ bool D2DBackend::render_shadow_bitmap(f32 width, f32 height, f32 radius, f32 blu
         return false;
     }
 
-    // Cap the cache; if exceeded, clear it entirely (lazily rebuilt next frame).
+    // Cap the cache with LRU eviction: drop the least recently used shadow instead of
+    // clearing everything (a full clear thrashed under many distinct shadow specs —
+    // every entry regenerated the next frame, spiking frame time).
     constexpr size_t kMaxShadows = 64;
-    if (shadow_cache_.size() >= kMaxShadows) shadow_cache_.clear();
+    if (shadow_cache_.size() >= kMaxShadows) {
+        size_t victim = 0;
+        for (size_t i = 1; i < shadow_cache_.size(); ++i) {
+            if (shadow_cache_[i].last_use < shadow_cache_[victim].last_use) victim = i;
+        }
+        shadow_cache_.erase(shadow_cache_.begin() + static_cast<std::ptrdiff_t>(victim));
+    }
 
     CachedShadow entry;
     entry.bitmap = final;
@@ -139,10 +151,14 @@ bool D2DBackend::render_shadow_bitmap(f32 width, f32 height, f32 radius, f32 blu
     return true;
 }
 
+bool D2DBackend::ensure_blur_effect() {
+    if (blur_effect_) return true;
+    if (!context_) return false;
+    return SUCCEEDED(context_->CreateEffect(kGaussianBlurClsid, &blur_effect_));
+}
+
 bool D2DBackend::draw_backdrop_blur(const RectF& rect, f32 blur, const Color& tint, f32 radius) {
     if (!context_ || !drawing_ || !layer_ || blur <= 0.0f) return false;
-
-    context_->Flush();
 
     // Register the snapshot region (rect + 3*blur margin) so Window's dirty-rect policy repaints
     // it in full this frame; otherwise the snapshot captures stale pixels.
@@ -177,39 +193,45 @@ bool D2DBackend::draw_backdrop_blur(const RectF& rect, f32 blur, const Color& ti
     const UINT32 h = static_cast<UINT32>(std::ceil(src_b - src_t));
     if (w == 0 || h == 0) return false;
 
-    HRESULT hr = S_OK;
+    // Snapshot in FP16 matching the layer: no intermediate quantization before the blur.
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> snapshot;
     if (blur_snapshot_ && blur_snapshot_w_ == w && blur_snapshot_h_ == h) {
         snapshot = blur_snapshot_;
     } else {
         D2D1_BITMAP_PROPERTIES1 props = D2D1::BitmapProperties1(
             D2D1_BITMAP_OPTIONS_NONE,
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+            D2D1::PixelFormat(DXGI_FORMAT_R16G16B16A16_FLOAT, D2D1_ALPHA_MODE_PREMULTIPLIED),
             static_cast<f32>(dpi_), static_cast<f32>(dpi_));
-        hr = context_->CreateBitmap(D2D1::SizeU(w, h), nullptr, 0, props, &snapshot);
-        if (FAILED(hr)) return false;
+        HRESULT hr0 = context_->CreateBitmap(D2D1::SizeU(w, h), nullptr, 0, props, &snapshot);
+        if (FAILED(hr0)) return false;
         blur_snapshot_ = snapshot;
         blur_snapshot_w_ = w;
         blur_snapshot_h_ = h;
     }
 
+    // Flush before the read-back copy: layer_ is the CURRENT render target here, and
+    // CopyFromBitmap can otherwise capture pixels before this frame's queued draws
+    // reach the GPU -> the panel shows last-frame content (visible flicker whenever
+    // the page changes). The sync is load-bearing; do not remove.
+    context_->Flush();
+
     const D2D1_RECT_U src_rect = D2D1::RectU(static_cast<UINT32>(src_l), static_cast<UINT32>(src_t),
                                              static_cast<UINT32>(src_r), static_cast<UINT32>(src_b));
-    hr = snapshot->CopyFromBitmap(nullptr, layer_.Get(), &src_rect);
-    if (FAILED(hr)) return false;
+    if (FAILED(snapshot->CopyFromBitmap(nullptr, layer_.Get(), &src_rect))) return false;
 
-    Microsoft::WRL::ComPtr<ID2D1Effect> blur_effect;
-    hr = context_->CreateEffect(kGaussianBlurClsid, &blur_effect);
-    if (FAILED(hr)) return false;
-    blur_effect->SetInput(0, snapshot.Get());
-    blur_effect->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, blur * scale);
+    // Cached effect: SetInput/SetValue are cheap property updates; creating an effect
+    // per draw was measurable churn on every blurred panel.
+    if (!ensure_blur_effect()) return false;
+    blur_effect_->SetInput(0, snapshot.Get());
+    blur_effect_->SetValue(D2D1_GAUSSIANBLUR_PROP_STANDARD_DEVIATION, blur * scale);
 
     const D2D1_POINT_2F origin = D2D1::Point2F(src_l / scale, src_t / scale);
 
     Microsoft::WRL::ComPtr<ID2D1RoundedRectangleGeometry> mask;
     if (radius > 0.0f) {
-        hr = factory_->CreateRoundedRectangleGeometry(to_d2d(rect, radius), &mask);
-        if (FAILED(hr)) return false;
+        if (FAILED(factory_->CreateRoundedRectangleGeometry(to_d2d(rect, radius), &mask))) {
+            return false;
+        }
     }
 
     D2D1_LAYER_PARAMETERS1 layer_params = D2D1::LayerParameters1(
@@ -217,7 +239,7 @@ bool D2DBackend::draw_backdrop_blur(const RectF& rect, f32 blur, const Color& ti
         D2D1::IdentityMatrix(), 1.0f, nullptr, D2D1_LAYER_OPTIONS1_NONE);
     context_->PushLayer(layer_params, nullptr);
 
-    context_->DrawImage(blur_effect.Get(), origin, D2D1_INTERPOLATION_MODE_LINEAR,
+    context_->DrawImage(blur_effect_.Get(), origin, D2D1_INTERPOLATION_MODE_LINEAR,
                         D2D1_COMPOSITE_MODE_SOURCE_OVER);
 
     if (!tint.is_transparent()) {

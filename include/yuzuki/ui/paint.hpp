@@ -47,6 +47,7 @@ struct PaintCommand {
     TextAlignV align_v = TextAlignV::Center;
     String text;
     Transform2D transform;  // PushVisual: the widget's visual transform (input -> window space)
+    std::vector<GradientStop> stops;  // FillSweepGradient: explicit stop list
 };
 
 class PaintContext {
@@ -91,6 +92,9 @@ public:
     void fill_sweep_gradient(const RectF& rect, const Point& center, f32 start_angle,
                              f32 sweep_angle, const Color& color_a, const Color& color_b,
                              f32 radius = 0.0f) const;
+    void fill_sweep_gradient_stops(const RectF& rect, const Point& center, f32 start_angle,
+                                   f32 sweep_angle, const std::vector<GradientStop>& stops,
+                                   f32 radius = 0.0f) const;
     void draw_shadow(const RectF& rect, f32 radius, f32 blur, const Color& color) const;
     bool draw_backdrop_blur(const RectF& rect, f32 blur, const Color& tint, f32 radius) const;
     void draw_border(const RectF& rect, const Color& color, f32 width, f32 radius) const;

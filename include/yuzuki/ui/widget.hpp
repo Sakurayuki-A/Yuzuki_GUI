@@ -177,6 +177,13 @@ virtual void perform_layout(const PaintContext* ctx = nullptr);
 
     void request_focus();
 
+    // ===== IME (input method editor) =====
+    // Whether the focused widget wants composition input (text-entry controls).
+    virtual bool wants_ime() const { return false; }
+    // Caret rectangle in WINDOW coordinates; anchors the system composition/candidate
+    // windows. Empty rect = no anchor (IME UI falls back to the window corner).
+    virtual RectF ime_caret_rect() const { return RectF{}; }
+
 protected:
     // Invalidates old visual extent plus the new transformed footprint (animation use)
     void invalidate_visual();

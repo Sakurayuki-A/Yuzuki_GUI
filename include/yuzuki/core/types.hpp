@@ -191,6 +191,12 @@ struct Color {
 enum class TextAlignH : u8 { Left, Center, Right };
 enum class TextAlignV : u8 { Top, Center, Bottom };
 
+// One gradient stop: position in [0,1] along the gradient axis + color at that point.
+struct GradientStop {
+    f32 position = 0.0f;
+    Color color{};
+};
+
 enum class Cursor : u8 { Arrow, Hand, IBeam, Cross, SizeAll };
 
 }  // namespace yzk

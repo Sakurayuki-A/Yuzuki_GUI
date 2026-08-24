@@ -27,7 +27,7 @@ struct Theme {
     Color selection_bg{0x5A, 0x8F, 0xFF, 0xA6};
     Color selection_text{0x1E, 0x1E, 0x1E};
 
-    String font_family = "Satoshi";
+    String font_family = "Lexend Deca";
     f32 font_size = 14.0f;
     f32 font_size_small = 12.0f;
     f32 font_size_title = 18.0f;

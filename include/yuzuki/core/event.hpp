@@ -22,6 +22,8 @@ enum class EventType : u8 {
     DragStart,
     DragMove,
     DragEnd,
+    ImeCompose,   // composition (pre-edit) string updated; text may be empty (cancelled)
+    ImeCommit,    // final committed string
 };
 
 enum MouseButton : u8 {
@@ -54,9 +56,19 @@ struct KeyData {
     u16 chr = 0;
     u8 mods = KeyModifier_None;
     bool repeat = false;
-};union EventData {
+};
+
+struct ImeData {
+    // Not owned by the event: points into Window-owned storage valid during dispatch.
+    const wchar_t* text = nullptr;
+    u32 length = 0;
+    u32 cursor = 0;  // caret offset inside a composition string
+};
+
+union EventData {
     MouseData mouse;
     KeyData key;
+    ImeData ime;
 };
 
 struct Event {

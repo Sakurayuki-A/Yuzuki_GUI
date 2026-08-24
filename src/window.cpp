@@ -8,6 +8,8 @@
 #include "ui/window_internal.hpp"
 #include "render/d2d/d2d_backend.hpp"
 
+#include <imm.h>
+
 namespace yzk {
 
 namespace {
@@ -172,6 +174,96 @@ void Window::set_focus(Widget* widget) {
         widget->on_event(got);
         widget->invalidate();
     }
+    // The new focus target decides whether composition input is enabled and where
+    // the IME UI anchors.
+    apply_ime_focus();
+    refresh_ime_anchor();
+}
+
+void Window::refresh_ime_anchor() {
+    if (!hwnd_ || !focused_ || !focused_->wants_ime()) return;
+    HIMC himc = ImmGetContext(static_cast<HWND>(hwnd_));
+    if (!himc) return;
+    const RectF r = focused_->ime_caret_rect();
+    if (!r.empty()) {
+        COMPOSITIONFORM cf{};
+        cf.dwStyle = CFS_POINT;
+        cf.ptCurrentPos.x = static_cast<LONG>(r.left);
+        cf.ptCurrentPos.y = static_cast<LONG>(r.bottom);
+        ImmSetCompositionWindow(himc, &cf);
+        CANDIDATEFORM cand{};
+        cand.dwIndex = 0;
+        cand.dwStyle = CFS_EXCLUDE;
+        cand.ptCurrentPos = cf.ptCurrentPos;
+        cand.rcArea = RECT{static_cast<LONG>(r.left), static_cast<LONG>(r.top),
+                           static_cast<LONG>(r.right), static_cast<LONG>(r.bottom)};
+        ImmSetCandidateWindow(himc, &cand);
+    }
+    ImmReleaseContext(static_cast<HWND>(hwnd_), himc);
+}
+
+void Window::apply_ime_focus() {
+    if (!hwnd_) return;
+    const bool want =
+        focused_ && focused_->visible() && focused_->enabled() && focused_->wants_ime();
+    if (want && ime_disabled_) {
+        ImmAssociateContext(static_cast<HWND>(hwnd_), static_cast<HIMC>(ime_prev_context_));
+        ime_prev_context_ = nullptr;
+        ime_disabled_ = false;
+    } else if (!want && !ime_disabled_) {
+        ime_prev_context_ = ImmAssociateContext(static_cast<HWND>(hwnd_), nullptr);
+        ime_disabled_ = true;
+    }
+}
+
+void Window::on_ime_composition(u32 flags) {
+    if (!hwnd_ || !focused_) return;
+    HIMC himc = ImmGetContext(static_cast<HWND>(hwnd_));
+    if (!himc) return;
+
+    const auto read_string = [&](DWORD code) {
+        LONG bytes = ImmGetCompositionStringW(himc, code, nullptr, 0);
+        if (bytes <= 0) return WString{};
+        WString s(static_cast<size_t>(bytes) / sizeof(wchar_t), L'\0');
+        ImmGetCompositionStringW(himc, code, s.data(), bytes);
+        return s;
+    };
+
+    if (flags & GCS_RESULTSTR) {
+        ime_text_buffer_ = read_string(GCS_RESULTSTR);
+        if (!ime_text_buffer_.empty()) {
+            Event e;
+            e.type = EventType::ImeCommit;
+            e.data.ime.text = ime_text_buffer_.c_str();
+            e.data.ime.length = static_cast<u32>(ime_text_buffer_.size());
+            focused_->on_event(e);
+        }
+        refresh_ime_anchor();
+    }
+    if (flags & GCS_COMPSTR) {
+        ime_text_buffer_ = read_string(GCS_COMPSTR);
+        LONG cursor = ImmGetCompositionStringW(himc, GCS_CURSORPOS, nullptr, 0);
+        if (cursor < 0 || cursor > static_cast<LONG>(ime_text_buffer_.size())) cursor = 0;
+        Event e;
+        e.type = EventType::ImeCompose;
+        e.data.ime.text = ime_text_buffer_.c_str();
+        e.data.ime.length = static_cast<u32>(ime_text_buffer_.size());
+        e.data.ime.cursor = static_cast<u32>(cursor);
+        focused_->on_event(e);
+    }
+    ImmReleaseContext(static_cast<HWND>(hwnd_), himc);
+}
+
+void Window::on_ime_end_composition() {
+    // Cancel path (e.g. Esc): clear leftover pre-edit display. After a normal commit
+    // this is a harmless no-op.
+    if (!focused_) return;
+    Event e;
+    e.type = EventType::ImeCompose;
+    e.data.ime.text = nullptr;
+    e.data.ime.length = 0;
+    e.data.ime.cursor = 0;
+    focused_->on_event(e);
 }
 
 void Window::start_timer(Widget* widget, u32 interval_ms) {

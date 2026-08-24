@@ -45,11 +45,33 @@ int Application::run() {
         // render storms (one render per loop) or starve animations (tweens sample
         // real time inside pump).
         bool rendered = false;
+        AnimationSystem& anims = AnimationSystem::instance();
+        const bool animating = anims.active() || anims.frame_count() > 0;
         for (Window* window : windows_) {
-            if (window->needs_paint()) rendered |= window->pump();
+            // Animations must keep pumping even when no damage is pending: a tween's
+            // on_update invalidates inside pump (tick_animations) BEFORE needs_paint_ is
+            // reset, so without this gate the loop would stop calling pump() once
+            // needs_paint_ clears and tweens would stall.
+            if (window->needs_paint() || animating)
+                rendered |= window->pump();
         }
-        // No messages and nothing to render: sleep until a message arrives, don't spin CPU
-        if (!processed && !rendered) WaitMessage();
+        if (!processed && !rendered) {
+            // There may still be a frame pending: pump()'s 16ms frame guard returns
+            // false while keeping needs_paint_ true (see "keep damage accumulating"),
+            // and an animation may have finished during the pump above. In either case
+            // we must yield briefly instead of WaitMessage(), or the final "settled"
+            // frame of a collapse/exit animation would never render until the next
+            // input event (mouse wiggle). Recompute pending state here because tweens
+            // can finish inside pump(), making the `animating` flag computed above stale.
+            bool pending = false;
+            for (Window* window : windows_) pending = pending || window->needs_paint();
+            pending = pending || anims.active() || anims.frame_count() > 0;
+            if (pending) {
+                MsgWaitForMultipleObjectsEx(0, nullptr, 1, QS_ALLINPUT, 0);
+            } else {
+                WaitMessage();
+            }
+        }
     }
 }
 

@@ -13,8 +13,7 @@ int main() {
 
     Application& app = Application::instance();
 
-    Window window("Window Demo", 900, 640);
-    window.set_borderless(true);  // Borderless: custom title bar
+    Window window("Notification Demo", 800, 600);
     if (!window.create()) return 1;
 
     {
@@ -22,9 +21,10 @@ int main() {
         GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
         const std::wstring dir(exe_path, wcsrchr(exe_path, L'\\') + 1);
         window.backend().add_font_file(utf::to_utf8(dir + L"LexendDeca-Regular.ttf"));
+        window.backend().add_font_file(utf::to_utf8(dir + L"Phosphor.ttf"));
     }
 
-    window.set_root(make_window_demo_page(window));
+    window.set_root(make_notification_page(window));
     window.show();
     return app.run();
 }

@@ -1,4 +1,6 @@
 // D2D backend: image decoding (WIC) and drawing (rounded clipping via layer + cached geometry).
+// Bitmaps are device-loss-safe: the decoded WIC source is retained and the device-dependent
+// ID2D1Bitmap is rebuilt lazily, so BitmapId handles stay valid across target recreation.
 #include "d2d_backend.hpp"
 #include "d2d_internal.hpp"
 
@@ -39,24 +41,53 @@ BitmapId D2DBackend::load_bitmap(const String& path) {
     hr = context_->CreateBitmapFromWicBitmap(converter.Get(), nullptr, &bitmap);
     if (FAILED(hr)) return kInvalidBitmap;
 
-    bitmaps_.push_back(bitmap);
+    // Cache the DIP size at load so bitmap_size() works even without a live device.
+    const D2D1_SIZE_F size = bitmap->GetSize();
+    const f32 scale = dpi_ / 96.0f;
+
+    BitmapEntry entry;
+    entry.source = converter.Get();
+    entry.bitmap = std::move(bitmap);
+    entry.dip_size = Size{size.width / scale, size.height / scale};
+    bitmaps_.push_back(std::move(entry));
     return static_cast<BitmapId>(bitmaps_.size());
+}
+
+void D2DBackend::unload_bitmap(BitmapId id) {
+    if (id == kInvalidBitmap || id > bitmaps_.size()) return;
+    BitmapEntry& entry = bitmaps_[id - 1];
+    entry.bitmap.Reset();
+    entry.source.Reset();
+    entry.dip_size = Size{};
+    // Keep ids of live bitmaps stable; only compact trailing dead slots.
+    while (!bitmaps_.empty() && bitmaps_.back().empty()) bitmaps_.pop_back();
+}
+
+ID2D1Bitmap* D2DBackend::ensure_bitmap(u32 index) {
+    if (index >= bitmaps_.size() || !context_) return nullptr;
+    BitmapEntry& entry = bitmaps_[index];
+    if (entry.bitmap) return entry.bitmap.Get();
+    if (!entry.source) return nullptr;
+    if (FAILED(context_->CreateBitmapFromWicBitmap(entry.source.Get(), nullptr,
+                                                   &entry.bitmap))) {
+        return nullptr;
+    }
+    return entry.bitmap.Get();
 }
 
 Size D2DBackend::bitmap_size(BitmapId id) const {
     if (id == kInvalidBitmap || id > bitmaps_.size()) return Size{};
-    const D2D1_SIZE_F size = bitmaps_[id - 1]->GetSize();
-    const f32 scale = dpi_ / 96.0f;
-    return Size{size.width / scale, size.height / scale};
+    return bitmaps_[id - 1].dip_size;
 }
 
 void D2DBackend::draw_bitmap(BitmapId id, const RectF& rect, f32 radius) {
     if (!context_ || !drawing_ || id == kInvalidBitmap || id > bitmaps_.size()) return;
+    ID2D1Bitmap* bitmap = ensure_bitmap(static_cast<u32>(id - 1));
+    if (!bitmap) return;
 
     if (radius <= 0.0f) {
         const D2D1_RECT_F r = to_d2d(rect);
-        context_->DrawBitmap(bitmaps_[id - 1].Get(), &r, 1.0f,
-                             D2D1_INTERPOLATION_MODE_LINEAR, nullptr, nullptr);
+        context_->DrawBitmap(bitmap, &r, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR, nullptr, nullptr);
         return;
     }
 
@@ -81,8 +112,7 @@ void D2DBackend::draw_bitmap(BitmapId id, const RectF& rect, f32 radius) {
         D2D1::InfiniteRect(), rounded_geometry_.Get(), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE,
         D2D1::IdentityMatrix(), 1.0f, nullptr, D2D1_LAYER_OPTIONS1_NONE);
     context_->PushLayer(&params, clip_layer_.Get());
-    context_->DrawBitmap(bitmaps_[id - 1].Get(), &r, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR,
-                         nullptr, nullptr);
+    context_->DrawBitmap(bitmap, &r, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR, nullptr, nullptr);
     context_->PopLayer();
 }
 

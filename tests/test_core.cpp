@@ -581,17 +581,23 @@ void test_text_box() {
     ro.on_event(ch3);
     CHECK(ro.text() == "abc");
 
-    // Multiline: Enter inserts a newline
+    // Multiline: Enter inserts exactly ONE newline. The KeyDown (VK_RETURN) owns the
+    // insertion; the WM_CHAR '\r' that TranslateMessage delivers for the same press
+    // must be ignored, or every Enter would produce a double newline.
     TextBoxConfig cfg;
     cfg.mode = TextBoxMode::MultiLine;
     TextBox ml("ab", cfg);
     Event focus3;
     focus3.type = EventType::FocusGained;
     ml.on_event(focus3);
-    Event enter;
-    enter.type = EventType::Character;
-    enter.data.key.chr = L'\r';
-    ml.on_event(enter);
+    Event enter_down;
+    enter_down.type = EventType::KeyDown;
+    enter_down.data.key.code = VK_RETURN;
+    ml.on_event(enter_down);
+    Event enter_char;
+    enter_char.type = EventType::Character;
+    enter_char.data.key.chr = L'\r';
+    ml.on_event(enter_char);
     CHECK(ml.text() == "ab\n");
 }
 

@@ -15,28 +15,50 @@ bool D2DBackend::add_font_file(const String& path) {
     HRESULT hr = dwrite_.As(&factory3);
     if (FAILED(hr)) return false;
 
+    // Duplicate registration: the current collection already contains the file.
+    for (const FontFileEntry& entry : font_files_) {
+        if (entry.path == wide_path) return true;
+    }
+
     Microsoft::WRL::ComPtr<IDWriteFontFile> font_file;
     hr = factory3->CreateFontFileReference(wide_path.c_str(), nullptr, &font_file);
     if (FAILED(hr)) return false;
 
+    // Accumulate: rebuild the set from every registered file so a new add_font_file
+    // never drops previously loaded fonts (UI font + icon font must coexist).
+    font_files_.push_back({wide_path, std::move(font_file)});
+
     Microsoft::WRL::ComPtr<IDWriteFontSetBuilder> builder_base;
     hr = factory3->CreateFontSetBuilder(&builder_base);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        font_files_.pop_back();
+        return false;
+    }
 
     Microsoft::WRL::ComPtr<IDWriteFontSetBuilder1> builder;
     builder_base.As(&builder);
-    if (!builder) return false;
+    if (!builder) {
+        font_files_.pop_back();
+        return false;
+    }
 
-    hr = builder->AddFontFile(font_file.Get());
-    if (FAILED(hr)) return false;
+    for (const FontFileEntry& entry : font_files_) {
+        builder->AddFontFile(entry.file.Get());
+    }
 
     Microsoft::WRL::ComPtr<IDWriteFontSet> font_set;
     hr = builder->CreateFontSet(&font_set);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        font_files_.pop_back();
+        return false;
+    }
 
     Microsoft::WRL::ComPtr<IDWriteFontCollection1> collection1;
     hr = factory3->CreateFontCollectionFromFontSet(font_set.Get(), &collection1);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        font_files_.pop_back();
+        return false;
+    }
     collection1.As(&font_collection_);
     return true;
 }
@@ -126,14 +148,29 @@ Size D2DBackend::measure_text(FontId font, const String& text, f32 max_width) {
     return Size{metrics.width, metrics.height};
 }
 
+bool D2DBackend::get_hit_layout(FontId font, const std::wstring& wide, f32 width,
+                                Microsoft::WRL::ComPtr<IDWriteTextLayout>* out_layout) {
+    DWRITE_TEXT_METRICS metrics{};
+    if (!get_layout(font, wide, width, 1e7f, out_layout, &metrics)) return false;
+    if (metrics.height <= 0.0f || metrics.height >= 1e6f) return true;
+    // Re-create at the real wrapped height so hit-test geometry matches the drawn text.
+    // Not cached: interaction-time only, and the huge-height layout stays shared.
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> exact;
+    if (SUCCEEDED(dwrite_->CreateTextLayout(wide.c_str(), static_cast<UINT32>(wide.size()),
+                                            fonts_[font - 1].Get(), width, metrics.height,
+                                            &exact))) {
+        *out_layout = exact;
+    }
+    return true;
+}
+
 i32 D2DBackend::hit_test_text(FontId font, const String& text, f32 width, f32 x, f32 y) {
     if (font == kInvalidFont || font > fonts_.size() || text.empty()) return 0;
     if (width <= 0.0f) width = 1e7f;
 
     const WString wide = utf::to_wide(text);
     Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
-    DWRITE_TEXT_METRICS dummy{};
-    if (!get_layout(font, wide, width, 1e7f, &layout, &dummy)) return 0;
+    if (!get_hit_layout(font, wide, width, &layout)) return 0;
 
     BOOL is_trailing = FALSE;
     BOOL is_inside = FALSE;
@@ -156,8 +193,7 @@ Point D2DBackend::caret_position(FontId font, const String& text, f32 width, i32
 
     const WString wide = utf::to_wide(text);
     Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
-    DWRITE_TEXT_METRICS dummy{};
-    if (!get_layout(font, wide, width, 1e7f, &layout, &dummy)) return Point{};
+    if (!get_hit_layout(font, wide, width, &layout)) return Point{};
 
     FLOAT x = 0.0f;
     FLOAT y = 0.0f;
@@ -171,10 +207,10 @@ Point D2DBackend::caret_position(FontId font, const String& text, f32 width, i32
 std::vector<TextSelectionRect> D2DBackend::text_selection_rects(FontId font, const String& text,
                                                                 f32 width, f32 height, i32 begin,
                                                                 i32 end) {
+    (void)height;  // geometry comes from the real wrapped layout now
     std::vector<TextSelectionRect> result;
     if (font == kInvalidFont || font > fonts_.size() || text.empty()) return result;
     if (width <= 0.0f) width = 1e7f;
-    if (height <= 0.0f) height = 1e7f;
 
     const WString wide = utf::to_wide(text);
     const UINT32 size = static_cast<UINT32>(wide.size());
@@ -183,8 +219,7 @@ std::vector<TextSelectionRect> D2DBackend::text_selection_rects(FontId font, con
     if (begin >= end) return result;
 
     Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
-    DWRITE_TEXT_METRICS dummy{};
-    if (!get_layout(font, wide, width, height, &layout, &dummy)) return result;
+    if (!get_hit_layout(font, wide, width, &layout)) return result;
 
     const UINT32 length = static_cast<UINT32>(end - begin);
     std::vector<DWRITE_HIT_TEST_METRICS> metrics(length);

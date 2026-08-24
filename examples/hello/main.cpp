@@ -103,7 +103,7 @@ int main() {
         wchar_t exe_path[MAX_PATH] = {};
         GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
         const std::wstring dir(exe_path, wcsrchr(exe_path, L'\\') + 1);
-        window.backend().add_font_file(utf::to_utf8(dir + L"Satoshi-Regular.otf"));
+        window.backend().add_font_file(utf::to_utf8(dir + L"LexendDeca-Regular.ttf"));
     }
 
     auto root = std::make_unique<StackPanel>(Orientation::Vertical);

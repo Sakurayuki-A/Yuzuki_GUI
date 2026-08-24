@@ -23,6 +23,10 @@ public:
 
 private:
     f32 value_at_x(f32 x) const;
+    // Window-client X -> widget-local X (mouse events arrive in window coordinates,
+    // while bounds_ is parent-local; skipping this conversion offsets the thumb by
+    // the accumulated ancestor offset — and any layout shift mid-drag desyncs it).
+    f32 local_x(f32 window_x) const;
 
     f32 min_ = 0.0f;
     f32 max_ = 100.0f;

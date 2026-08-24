@@ -138,6 +138,11 @@ against the bundled font) and `icon_glyph(id)`. Load `Phosphor.ttf` via
   custom caption widgets (`set_caption`), edge resizing, and taskbar-aware maximize.
 - Per-monitor DPI with `WM_DPICHANGED` handling.
 - Minimal move/resize flicker: dirty-rect rendering keeps redraws small during sizing.
+- **IME composition**: text-entry widgets declare `wants_ime()`; the system pre-edit
+  window is suppressed (`WM_IME_SETCONTEXT`) and TextBox renders the composing string
+  inline at the caret with an underline, while the candidate list is anchored to the
+  caret via `ImmSetCompositionWindow/CandidateWindow`. Password fields disable the IME
+  entirely (`ImmAssociateContext`). Events: `ImeCompose` / `ImeCommit`.
 
 ## Controls inventory
 
@@ -196,6 +201,7 @@ layout invariants, animation math, and core utilities (169 checks).
 - Controls: 24 controls across 8 categories, virtualized ListView
 - Examples: 10 runnable demos including a 2000-widget perf test
 - Tests: 169 checks passing
+- IME: inline composition in TextBox, caret-anchored candidate window, password opt-out
 
 ### Next
 
@@ -205,46 +211,74 @@ effects. No cross-platform backends are planned — Yuzuki stays Windows + Direc
 
 #### Effects (visual quality)
 
-- [ ] Sweep gradient seam: the shader wraps the angle with `frac`
-      (`src/render/d2d/sweep_effect.cpp`), producing a hard color discontinuity at the
-      0°/360° wrap point and at `atan2`'s ±π branch cut. Add smooth blending across the
-      wrap and multi-stop support.
-- [ ] Backdrop blur banding: the blur snapshot is 8-bit UNORM while shadows render in
-      16-bit float — unify on a 16-bit intermediate format.
-- [ ] Shadow cache eviction: the 64-entry cache clears entirely on overflow
-      (`src/render/d2d/d2d_effects.cpp`), thrashing under many distinct shadow specs —
-      switch to LRU eviction.
-- [ ] Shadow size quantization: the 4 DIP grid (`kShadowGrid`) makes shadows step visibly
-      when controls animate size — scale the grid by blur or add a second refinement tier.
+- [x] Sweep gradient seam: fixed — the shader rotates samples into the sweep frame so
+      `atan2`'s branch cut lands exactly at the arc start, full sweeps fade back to the
+      first stop over the final 20% with smoothstep (no band at 0°/360°), partial arcs
+      clamp instead of wrapping. Multi-stop support added: `fill_sweep_gradient_stops`
+      interpolates up to 8 stops piecewise-linearly (extras evenly reduced, unsorted
+      input normalized); the shader now compiles at runtime from embedded source via
+      d3dcompiler, replacing the hand-maintained CSO blob (`src/render/d2d/sweep_effect.*`).
+- [x] Backdrop blur banding: the whole compositing chain (layer, blur snapshot) now
+      renders in 16-bit float — matching the shadow path — so soft gradients never
+      quantize into visible bands; the only 8-bit step is the final Present.
+- [x] Shadow cache eviction: the 64-entry cache used to clear entirely on overflow,
+      thrashing under many distinct shadow specs. Entries now carry a monotonic
+      last-use stamp and eviction drops only the least recently used shadow
+      (`src/render/d2d/d2d_effects.cpp`).
+- [x] Shadow size quantization: the fixed 4 DIP grid (`kShadowGrid`) made shadows step
+      visibly when controls animated size. The grid now adapts to blur — soft shadows
+      keep the coarse reuse-friendly grid, crisp ones refine down to 1 DIP
+      (grid = clamp(blur * 0.5, 1, kShadowGrid), `src/render/d2d/d2d_effects.cpp`).
 
 #### Performance
 
-- [ ] Gradient brush reuse: `fill_gradient` / `fill_radial_gradient` recreate gradient stop
-      collections and brushes on every draw (`src/render/d2d/d2d_shapes.cpp`) — cache by
-      (size, colors, direction).
-- [ ] Sweep gradient cost: each sweep re-snapshots the rect, creates geometry, and pushes a
-      layer (`src/render/d2d/d2d_shapes.cpp`) — cache the snapshot by size and reuse the mask.
-- [ ] Backdrop blur churn: `Flush()` plus per-draw effect/geometry creation
-      (`src/render/d2d/d2d_effects.cpp`) — cache the blur effect and avoid the sync.
-- [ ] Offscreen compositing: every frame renders into `layer_` then copies full-screen to the
-      swapchain (`src/render/d2d/d2d_backend.cpp`) — draw directly when the frame has no
-      layer-dependent content.
-- [ ] Partial present: FLIP_DISCARD always falls back to full-screen `Present`
-      (`src/render/d2d/d2d_backend.cpp`), so dirty-rect presents never fire — either adopt
-      COPY mode or drop the dead path.
+- [x] Gradient brush reuse: `fill_gradient` / `fill_radial_gradient` recreated gradient
+      stop collections and brushes on every draw. Brushes are now cached LRU-bounded
+      (128 entries) by (kind, extent, color pair) and positioned per draw via a brush
+      translation, so one brush serves every rect of the same size; the cache is
+      cleared on device loss (`src/render/d2d/d2d_shapes.cpp`). Measured ~54x faster
+      on repeated gradient fills.
+- [x] Sweep gradient cost: the input snapshot is now cached by (size, dpi) and the
+      rounded mask geometry reuses the shared rounded-geometry cache; the per-draw
+      `Flush()` sync was dropped (same-context ordering suffices)
+      (`src/render/d2d/d2d_shapes.cpp`).
+- [x] Backdrop blur churn: the gaussian-blur effect is created once per device and
+      updated via SetInput/SetValue, and the snapshot bitmap is FP16 matching the
+      layer. The `Flush()` before the snapshot read-back copy stays — layer_ is the
+      live render target there and skipping the sync made the panel capture last
+      frame's pixels (flicker on page changes) (`src/render/d2d/d2d_effects.cpp`).
+- [x] Offscreen compositing: measured before attempting — the layer->swapchain
+      composite pass costs ~0.2 ms per frame at 800x600 (steady state; ~1 ms linear
+      estimate at 4K) against a 16 ms vsync budget. A direct-to-swapchain fast path
+      would only apply to full-repaint frames (FLIP_DISCARD gives the swapchain no
+      persistence, partial frames depend on the persistent layer), so the complexity
+      was declined. `RenderBackend::composite_ms_avg()` keeps this measurable.
+- [x] Partial present: the Present1 dirty-rect path was unreachable under FLIP_DISCARD
+      and logically inapplicable — the layer framebuffer is copied to the swapchain in
+      full every frame, so there is nothing to partially present. The dead path was
+      removed; dirty-rect policy lives entirely in the layer replay
+      (`src/render/d2d/d2d_backend.cpp`).
 
 #### Core robustness
 
-- [ ] Resource invalidation: `BitmapId` / `FontId` go stale after a device-loss rebuild
-      (`src/render/d2d/d2d_backend.cpp`) — add a generation counter or invalidation callback
-      so callers can reload.
-- [ ] Bitmap lifecycle: `load_bitmap` only appends (`src/render/d2d/d2d_bitmap.cpp`) — add
-      unload / release.
-- [ ] Font registration: `add_font_file` replaces the whole font set instead of accumulating
-      (`src/render/d2d/d2d_text.cpp`).
-- [ ] Text hit-testing: caret/selection queries lay out at a fake 1e7 height
-      (`src/render/d2d/d2d_text.cpp`) — use the real wrapped layout height so multi-line
-      Chinese text hits correctly.
+- [x] Resource invalidation: after device loss `BitmapId` handles used to dangle
+      (`bitmaps_` was cleared) and context-bound caches (clip layers, visual layers,
+      cached geometry, sweep effect) leaked into the new device, failing the next
+      `EndDraw` with `D2DERR_WRONG_RESOURCE_DOMAIN`. Bitmap WIC sources are now kept so
+      device bitmaps rebuild lazily and ids stay valid; all device-scoped caches are
+      reset in `destroy_target` (`src/render/d2d/d2d_bitmap.cpp`, `d2d_backend.cpp`).
+- [x] Bitmap lifecycle: added `RenderBackend::unload_bitmap(BitmapId)` which releases
+      the device bitmap + decoded source; trailing dead slots compact so ids of live
+      bitmaps stay stable (`src/render/d2d/d2d_bitmap.cpp`).
+- [x] Font registration: `add_font_file` used to replace the whole font set on every
+      call, so loading a second font (e.g. the icon font) dropped the first — fixed by
+      accumulating all registered `IDWriteFontFile`s and rebuilding the collection per
+      load (`src/render/d2d/d2d_text.cpp`).
+- [x] Text hit-testing: caret/selection queries used to lay out at a fake 1e7 height.
+      Hit layouts now wrap at the real content height, TextBox hit-testing uses the same
+      wrap width as painting, and vertical caret movement derives line height from the
+      loaded font (fixed-height assumptions drifted with CJK fallback fonts) and clamps
+      into the content (`src/render/d2d/d2d_text.cpp`, `src/controls/text_box.cpp`).
 
 ## Design principles
 

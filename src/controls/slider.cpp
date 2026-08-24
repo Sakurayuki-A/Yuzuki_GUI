@@ -61,7 +61,7 @@ void Slider::on_event(Event& e) {
         case EventType::MouseDown:
             if (enabled() && (e.data.mouse.buttons & MouseButton_Left)) {
                 dragging_ = true;
-                const f32 v = value_at_x(e.data.mouse.x);
+                const f32 v = value_at_x(local_x(e.data.mouse.x));
                 if (v != value_) {
                     value_ = v;
                     on_changed(value_);
@@ -73,7 +73,7 @@ void Slider::on_event(Event& e) {
 
         case EventType::MouseMove:
             if (dragging_) {
-                const f32 v = value_at_x(e.data.mouse.x);
+                const f32 v = value_at_x(local_x(e.data.mouse.x));
                 if (v != value_) {
                     value_ = v;
                     on_changed(value_);
@@ -106,6 +106,14 @@ void Slider::on_event(Event& e) {
         default:
             break;
     }
+}
+
+f32 Slider::local_x(f32 window_x) const {
+    // Mouse events carry window-client coordinates; bounds_ is parent-local. Convert
+    // through global_bounds() so nested layouts (padding/scroll) and mid-drag layout
+    // shifts keep the thumb exactly under the cursor.
+    const RectF g = global_bounds();
+    return window_x - (g.left - bounds_.left);
 }
 
 f32 Slider::value_at_x(f32 x) const {
