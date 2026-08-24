@@ -82,6 +82,6 @@ YuzukiUI is built on the shoulders of two great open typefaces:
 
 ## Status
 
-0.2.0 alpha. Windows 10+, Visual Studio 2022, Direct2D backend.
+0.3.0 alpha. Windows 10+, Visual Studio 2022, Direct2D backend.
 
 [MIT](LICENSE) — free to use commercially.
