@@ -32,6 +32,7 @@ struct PaintCommand {
     };
 
     Type type;
+    Widget* source = nullptr;  // originating widget (null for framework-drawn commands)
     RectF rect;  // window-space extent (intersection culling + drawing)
     Color color_a;
     Color color_b;
@@ -70,6 +71,11 @@ public:
     f32 offset_x() const { return offset_x_; }
     f32 offset_y() const { return offset_y_; }
 
+    // Source widget tracking: set by Widget::paint before paint_impl so every
+    // recorded command carries the originating widget pointer for profiling / a11y.
+    void set_source(Widget* w) const { source_ = w; }
+    Widget* source() const { return source_; }
+
     // ===== Command list rendering =====
     // After begin_record, draw_* only record commands (no backend); the widget tree
     // is traversed once per frame. damage = nullptr means a full frame (no culling).
@@ -106,9 +112,6 @@ public:
     void draw_text(const String& text, const RectF& rect, const Color& color,
                    TextAlignH align_h = TextAlignH::Center, TextAlignV align_v = TextAlignV::Center) const;
     void draw_text_small(const String& text, const RectF& rect, const Color& color,
-                         TextAlignH align_h = TextAlignH::Left,
-                         TextAlignV align_v = TextAlignV::Top) const;
-    void draw_text_title(const String& text, const RectF& rect, const Color& color,
                          TextAlignH align_h = TextAlignH::Left,
                          TextAlignV align_v = TextAlignV::Top) const;
 
@@ -149,6 +152,7 @@ private:
         }
     }
     void push_command(PaintCommand cmd) const {
+        cmd.source = source_;
         commands_.push_back(std::move(cmd));
     }
 
@@ -156,13 +160,13 @@ private:
     const Theme& theme_;
     FontId font_;
     FontId font_small_;
-    FontId font_title_;
     mutable std::map<FontSpec, FontId> fonts_;
     mutable std::vector<RectF> painted_stack_;
     mutable std::vector<RectF> self_stack_;  // current widget's self-only painted extent
     mutable std::vector<Transform2D> visual_stack_;  // visual transforms accumulated during record (right-multiplied)
     mutable std::vector<PaintCommand> commands_;
     const std::vector<RectF>* record_damage_ = nullptr;
+    mutable Widget* source_ = nullptr;  // current widget being painted (set by Widget::paint)
     i32 clip_depth_ = 0;
     f32 offset_x_ = 0.0f;
     f32 offset_y_ = 0.0f;

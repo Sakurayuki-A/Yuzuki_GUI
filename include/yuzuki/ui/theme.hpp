@@ -3,6 +3,24 @@
 
 namespace yzk {
 
+// Semantic theme role for widgets whose color should follow the active theme at
+// paint time (instead of a snapshot Color). Resolved from Theme::get() every
+// repaint so a theme swap re-skins widgets automatically.
+enum class ThemeRole : u8 {
+    Background,
+    Surface,
+    SurfaceContainerLow,
+    SurfaceContainer,
+    SurfaceContainerHigh,
+    Border,
+    Track,
+    Accent,
+    AccentText,
+    Text,
+    TextSecondary,
+    TextDisabled,
+};
+
 struct Theme {
     Color background{0xF3, 0xF3, 0xF3};
     Color text{0x1E, 0x1E, 0x1E};
@@ -43,5 +61,8 @@ struct Theme {
     static Theme make_dark();
     static Theme make_light();
 };
+
+// Resolve a ThemeRole against a theme instance; returns the current palette entry.
+const Color& theme_color(const Theme& theme, ThemeRole role);
 
 }  // namespace yzk

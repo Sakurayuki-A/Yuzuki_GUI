@@ -5,21 +5,24 @@ namespace yzk {
 
 Icon::Icon(IconId id, f32 size) : id_(id), size_(size) {}
 
-void Icon::set_icon(IconId id) {
-    if (id_ == id) return;
+Icon& Icon::set_icon(IconId id) {
+    if (id_ == id) return *this;
     id_ = id;
     invalidate();
+    return *this;
 }
 
-void Icon::set_icon_size(f32 size) {
-    if (size_ == size) return;
+Icon& Icon::set_icon_size(f32 size) {
+    if (size_ == size) return *this;
     size_ = size;
     invalidate();
+    return *this;
 }
 
-void Icon::set_color(const Color& color) {
+Icon& Icon::set_color(const Color& color) {
     color_ = color;
     invalidate();
+    return *this;
 }
 
 Size Icon::measure_impl(Size available, const PaintContext* ctx) {

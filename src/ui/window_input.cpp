@@ -46,6 +46,7 @@ void Window::update_hover(f32 x, f32 y) {
     hover_ = hit;
 
     if (old) {
+        old->remove_flag(Widget::Flag_Hovered);
         Event leave;
         leave.type = EventType::MouseLeave;
         leave.data.mouse = MouseData{last_cursor_pos_x_, last_cursor_pos_y_, MouseButton_None, map_mods()};
@@ -56,6 +57,7 @@ void Window::update_hover(f32 x, f32 y) {
         if (old->has_self_visual()) old->invalidate();
     }
     if (hit) {
+        hit->add_flag(Widget::Flag_Hovered);
         Event enter;
         enter.type = EventType::MouseEnter;
         enter.data.mouse = MouseData{last_cursor_pos_x_, last_cursor_pos_y_, MouseButton_None, map_mods()};
@@ -257,15 +259,26 @@ void Window::on_mouse_input(u32 message, f32 x_px, f32 y_px, u8 buttons, u8 mods
         dragging_ = false;
         drag_source_ = nullptr;
         press_armed_ = false;
+
+        // On WM_*BUTTONUP the message's currently-held button mask no longer contains
+        // the button that was just released, so MouseUp handlers can't test
+        // (buttons & MouseButton_Left). Re-add the released bit to the up/click
+        // events so the button masks are the state *during* the event.
+        u8 released = 0;
+        if (message == WM_LBUTTONUP) released = MouseButton_Left;
+        if (message == WM_RBUTTONUP) released = MouseButton_Right;
+        if (message == WM_MBUTTONUP) released = MouseButton_Middle;
+        const u8 up_buttons = buttons | released;
+
         Event up;
         up.type = EventType::MouseUp;
-        up.data.mouse = MouseData{x, y, buttons, mods};
+        up.data.mouse = MouseData{x, y, up_buttons, mods};
         dispatch(target, up);
 
         if (hit_test(x, y) == target) {
             Event click;
             click.type = EventType::Click;
-            click.data.mouse = MouseData{x, y, buttons, mods};
+            click.data.mouse = MouseData{x, y, up_buttons, mods};
             dispatch(target, click);
         }
         capture_ = nullptr;

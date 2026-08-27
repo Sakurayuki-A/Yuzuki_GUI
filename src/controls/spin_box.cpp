@@ -30,20 +30,22 @@ SpinBox::SpinBox(f64 value, f64 min, f64 max, f64 step)
     sync_text();
 }
 
-void SpinBox::set_value(f64 value) {
+SpinBox& SpinBox::set_value(f64 value) {
     if (value < min_) value = min_;
     if (value > max_) value = max_;
-    if (value_ == value) return;
+    if (value_ == value) return *this;
     value_ = value;
     sync_text();
     on_value_changed(value_);
+    return *this;
 }
 
-void SpinBox::set_range(f64 min, f64 max) {
+SpinBox& SpinBox::set_range(f64 min, f64 max) {
     if (min > max) std::swap(min, max);
     min_ = min;
     max_ = max;
     if (value_ < min_ || value_ > max_) set_value(value_);
+    return *this;
 }
 
 void SpinBox::step_by(i32 dir) {

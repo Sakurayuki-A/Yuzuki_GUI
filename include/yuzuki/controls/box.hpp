@@ -1,5 +1,6 @@
 #pragma once
 
+#include <yuzuki/ui/theme.hpp>
 #include <yuzuki/ui/widget.hpp>
 
 namespace yzk {
@@ -21,23 +22,37 @@ public:
     Box() = default;
     explicit Box(const Color& bg) : bg_(bg) {}
 
-    void set_bg(const Color& color);
+    Box& set_bg(const Color& color);
     const Color& bg() const { return bg_; }
-    void set_radius(f32 radius);
+    // Semantic background: color resolved from the active theme at paint time
+    // instead of a snapshot. Untracked (has_bg_role_ = false) means bg_ is used.
+    Box& set_bg_role(ThemeRole role);
+    Box& clear_bg_role();
+    ThemeRole bg_role() const { return bg_role_; }
+    bool has_bg_role() const { return has_bg_role_; }
+
+    // Fluent short names (Lego-style); same as their set_ counterparts.
+    Box& bg(const Color& color) { return set_bg(color); }
+    Box& bg_role(ThemeRole role) { return set_bg_role(role); }
+    Box& radius(f32 radius) { return set_radius(radius); }
+
+    Box& set_radius(f32 radius);
     f32 radius() const { return radius_; }
 
-    void set_border_width(f32 width);
+    Box& set_border_width(f32 width);
     f32 border_width() const { return border_width_; }
-    void set_border_color(const Color& color);
+    Box& set_border_color(const Color& color);
     const Color& border_color() const { return border_color_; }
-    void set_border(f32 width, const Color& color);
+    Box& set_border(f32 width, const Color& color);
 
-    void set_padding(f32 padding);
+    Box& set_padding(f32 padding);
     f32 padding() const { return padding_; }
+    Box& padding(f32 padding) { return set_padding(padding); }
 
     // Shadow: blur radius (DIP), offset_y downward; blur <= 0 disables
-    void set_shadow(f32 blur, f32 offset_y = 4.0f);
-    void set_shadow_color(const Color& color);
+    Box& set_shadow(f32 blur, f32 offset_y = 4.0f);
+    Box& set_shadow_color(const Color& color);
+    Box& shadow(f32 blur, f32 offset_y = 4.0f) { return set_shadow(blur, offset_y); }
     f32 shadow_blur() const { return shadow_blur_; }
     f32 shadow_offset_y() const { return shadow_offset_y_; }
 
@@ -50,6 +65,8 @@ public:
 
 private:
     Color bg_{0, 0, 0, 0};
+    ThemeRole bg_role_ = ThemeRole::Surface;
+    bool has_bg_role_ = false;
     f32 radius_ = 0.0f;
     f32 border_width_ = 0.0f;
     Color border_color_{0, 0, 0, 0};

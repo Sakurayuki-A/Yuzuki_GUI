@@ -102,3 +102,39 @@ add_custom_command(TARGET notification_demo POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         ${CMAKE_SOURCE_DIR}/icofonts/regular/Phosphor.ttf
         $<TARGET_FILE_DIR:notification_demo>/Phosphor.ttf)
+
+add_executable(showcase
+    showcase/main.cpp
+    showcase/main_page.cpp
+    showcase/pane.cpp
+    showcase/buttons_page.cpp
+    showcase/inputs_page.cpp
+    showcase/selection_page.cpp
+    showcase/display_page.cpp
+    showcase/feedback_page.cpp
+    showcase/flex_page.cpp
+    showcase/dock_page.cpp
+    showcase/wrap_page.cpp
+    showcase/scroll_page.cpp
+    showcase/theme_page.cpp
+    showcase/performance_page.cpp)
+target_link_libraries(showcase PRIVATE yuzuki)
+add_custom_command(TARGET showcase POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/uiFonts/regular/LexendDeca-Regular.ttf
+        $<TARGET_FILE_DIR:showcase>/LexendDeca-Regular.ttf
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/icofonts/regular/Phosphor.ttf
+        $<TARGET_FILE_DIR:showcase>/Phosphor.ttf)
+
+add_executable(playground
+    playground/main.cpp
+    playground/app.cpp)
+target_link_libraries(playground PRIVATE yuzuki)
+add_custom_command(TARGET playground POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/uiFonts/regular/LexendDeca-Regular.ttf
+        $<TARGET_FILE_DIR:playground>/LexendDeca-Regular.ttf
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/icofonts/regular/Phosphor.ttf
+        $<TARGET_FILE_DIR:playground>/Phosphor.ttf)

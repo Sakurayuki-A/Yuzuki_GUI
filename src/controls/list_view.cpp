@@ -13,7 +13,7 @@ constexpr f32 kThumbMinHeight = 24.0f;
 constexpr f32 kWheelStep = 48.0f;
 }
 
-void ListView::set_items(const std::vector<String>& items) {
+ListView& ListView::set_items(const std::vector<String>& items) {
     source_ = nullptr;
     items_ = items;
     selected_ = -1;
@@ -21,32 +21,36 @@ void ListView::set_items(const std::vector<String>& items) {
     scroll_y_ = 0.0f;
     max_scroll_ = 0.0f;
     invalidate();
+    return *this;
 }
 
-void ListView::set_data_source(DataSource* source) {
-    if (source_ == source) return;
+ListView& ListView::set_data_source(DataSource* source) {
+    if (source_ == source) return *this;
     source_ = source;
     selected_ = -1;
     hovered_ = -1;
     scroll_y_ = 0.0f;
     max_scroll_ = 0.0f;
     invalidate();
+    return *this;
 }
 
-void ListView::set_row_delegate(RowDelegate* delegate) {
-    if (delegate_ == delegate) return;
+ListView& ListView::set_row_delegate(RowDelegate* delegate) {
+    if (delegate_ == delegate) return *this;
     delegate_ = delegate;
     invalidate();
+    return *this;
 }
 
-void ListView::add_item(const String& item) {
-    if (source_) return;  // Data source mode: content managed by the source
+ListView& ListView::add_item(const String& item) {
+    if (source_) return *this;  // Data source mode: content managed by the source
     items_.push_back(item);
     update_max_scroll();
     invalidate();
+    return *this;
 }
 
-void ListView::clear_items() {
+ListView& ListView::clear_items() {
     source_ = nullptr;
     items_.clear();
     selected_ = -1;
@@ -54,40 +58,46 @@ void ListView::clear_items() {
     scroll_y_ = 0.0f;
     max_scroll_ = 0.0f;
     invalidate();
+    return *this;
 }
 
-void ListView::set_selected(i32 index) {
-    if (index < -1 || index >= count()) return;
-    if (selected_ == index) return;
+ListView& ListView::set_selected(i32 index) {
+    if (index < -1 || index >= count()) return *this;
+    if (selected_ == index) return *this;
     selected_ = index;
     on_selected(selected_);
     invalidate();
+    return *this;
 }
 
-void ListView::set_hovered(i32 index) {
-    if (index < -1 || index >= count()) return;
-    if (hovered_ == index) return;
+ListView& ListView::set_hovered(i32 index) {
+    if (index < -1 || index >= count()) return *this;
+    if (hovered_ == index) return *this;
     hovered_ = index;
     invalidate();
+    return *this;
 }
 
-void ListView::set_row_height(f32 height) {
-    if (row_height_ == height) return;
+ListView& ListView::set_row_height(f32 height) {
+    if (row_height_ == height) return *this;
     row_height_ = height;
     update_max_scroll();
     invalidate();
+    return *this;
 }
 
-void ListView::set_scroll_y(f32 y) {
+ListView& ListView::set_scroll_y(f32 y) {
     update_max_scroll();
-    if (scroll_y_ == y) return;
+    if (scroll_y_ == y) return *this;
     scroll_y_ = y;
     clamp_scroll();
     invalidate();
+    return *this;
 }
 
-void ListView::scroll_by(f32 dy) {
+ListView& ListView::scroll_by(f32 dy) {
     set_scroll_y(scroll_y_ + dy);
+    return *this;
 }
 
 void ListView::update_max_scroll() {

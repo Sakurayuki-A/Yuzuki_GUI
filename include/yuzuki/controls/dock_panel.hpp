@@ -14,7 +14,8 @@ public:
     void dock(Widget* child, Dock dock);
 
     f32 gap() const { return gap_; }
-    void set_gap(f32 gap);
+    DockPanel& set_gap(f32 gap);
+    DockPanel& gap(f32 gap) { return set_gap(gap); }
 
     Size measure_content(Size available, const PaintContext* ctx) override;
     void arrange_content(const RectF& area, const PaintContext* ctx) override;

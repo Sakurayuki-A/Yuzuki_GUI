@@ -13,9 +13,10 @@ bool Image::load_from_file(Window& win, const String& path) {
     return true;
 }
 
-void Image::set_bitmap(BitmapId id) {
+Image& Image::set_bitmap(BitmapId id) {
     bitmap_ = id;
     invalidate();
+    return *this;
 }
 
 Size Image::measure_impl(Size available, const PaintContext* ctx) {

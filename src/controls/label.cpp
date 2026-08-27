@@ -12,40 +12,46 @@ f32 estimate_text_width(const String& text, f32 font_size) {
 
 Label::Label(String text) : text_(std::move(text)) {}
 
-void Label::set_text(const String& text) {
-    if (text_ == text) return;
+Label& Label::set_text(const String& text) {
+    if (text_ == text) return *this;
     text_ = text;
     invalidate();
+    return *this;
 }
 
-void Label::set_text_color(const Color& color) {
-    if (text_color_ == color) return;
+Label& Label::set_text_color(const Color& color) {
+    if (text_color_ == color) return *this;
     text_color_ = color;
     invalidate();
+    return *this;
 }
 
-void Label::set_text_role(TextRole role) {
-    if (text_role_ == role) return;
+Label& Label::set_text_role(TextRole role) {
+    if (text_role_ == role) return *this;
     text_role_ = role;
     invalidate();
+    return *this;
 }
 
-void Label::set_small(bool small) {
-    if (small_ == small) return;
+Label& Label::set_small(bool small) {
+    if (small_ == small) return *this;
     small_ = small;
     invalidate();
+    return *this;
 }
 
-void Label::set_bold(bool bold) {
-    if (bold_ == bold) return;
+Label& Label::set_bold(bool bold) {
+    if (bold_ == bold) return *this;
     bold_ = bold;
     invalidate();
+    return *this;
 }
 
-void Label::set_align(TextAlignH align_h, TextAlignV align_v) {
+Label& Label::set_align(TextAlignH align_h, TextAlignV align_v) {
     align_h_ = align_h;
     align_v_ = align_v;
     invalidate();
+    return *this;
 }
 
 Size Label::measure_impl(Size available, const PaintContext* ctx) {

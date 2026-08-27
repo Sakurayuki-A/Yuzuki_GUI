@@ -2,6 +2,8 @@
 #include <yuzuki/ui/widget.hpp>
 #include <yuzuki/ui/paint.hpp>
 
+#include <functional>
+
 namespace yzk {
 
 class Slider : public Widget {
@@ -12,10 +14,19 @@ public:
     f32 min() const { return min_; }
     f32 max() const { return max_; }
 
-    void set_range(f32 min, f32 max);
-    void set_value(f32 value);
+    Slider& set_range(f32 min, f32 max);
+    Slider& set_value(f32 value);
 
-    virtual void on_changed(f32 value) { (void)value; }
+    // Convenience callback registration; the virtual hook below is invoked with it.
+    Slider& set_on_changed(std::function<void(f32)> cb) {
+        on_changed_cb_ = std::move(cb);
+        return *this;
+    }
+    Slider& on_changed(std::function<void(f32)> cb) { return set_on_changed(std::move(cb)); }
+
+    virtual void on_changed(f32 value) {
+        if (on_changed_cb_) on_changed_cb_(value);
+    }
 
     Size measure_impl(Size available, const PaintContext* ctx) override;
     void paint_impl(PaintContext& ctx) override;
@@ -32,6 +43,7 @@ private:
     f32 max_ = 100.0f;
     f32 value_ = 0.0f;
     bool dragging_ = false;
+    std::function<void(f32)> on_changed_cb_;
 };
 
 }  // namespace yzk

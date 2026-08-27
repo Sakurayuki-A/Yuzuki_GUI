@@ -277,6 +277,18 @@ void D2DBackend::draw_text(FontId font, const String& text, const RectF& rect,
         case TextAlignV::Bottom: origin.y = rect.bottom - metrics.height; break;
     }
 
+    // Pixel-snap the BASELINE (Y) to whole device pixels: keeps rows crisp and
+    // baselines stable across frames. Horizontal stays subpixel on purpose — forcing
+    // stems onto a single pixel column leaves them two-tone (covered / empty), which
+    // reads as harsh jaggy strokes for dark-on-light text under grayscale AA; letting
+    // X stay fractional spreads each stem across two columns for smooth edges.
+    // Skipped while a visual transform is active: the world transform maps the point
+    // elsewhere and snapping there would fight animations (rotate/scale sampling).
+    if (visual_transform_stack_.empty()) {
+        const f32 scale = dpi_ / 96.0f;
+        origin.y = std::round(origin.y * scale) / scale;
+    }
+
     context_->DrawTextLayout(origin, layout.Get(), brush_.Get());
 }
 

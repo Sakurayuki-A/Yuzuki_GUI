@@ -8,17 +8,17 @@ class ScrollView : public Widget {
 public:
     ScrollView() = default;
 
-    void set_content(Widget* content);
+    ScrollView& set_content(Widget* content);
     Widget* content() const { return content_; }
 
     f32 scroll_y() const { return scroll_y_; }
-    void set_scroll_y(f32 y);
-    void scroll_by(f32 dy);
+    ScrollView& set_scroll_y(f32 y);
+    ScrollView& scroll_by(f32 dy);
 
     bool has_scrollbar() const { return max_scroll_ > 0.0f; }
 
     f32 suggested_height() const { return suggested_height_; }
-    void set_suggested_height(f32 height);
+    ScrollView& set_suggested_height(f32 height);
 
     Size measure_impl(Size available, const PaintContext* ctx) override;
     void perform_layout(const PaintContext* ctx = nullptr) override;
@@ -34,7 +34,7 @@ private:
     f32 scroll_y_ = 0.0f;
     f32 max_scroll_ = 0.0f;
     f32 content_height_ = 0.0f;
-    f32 suggested_height_ = 220.0f;
+    f32 suggested_height_ = 0.0f;
     bool dragging_thumb_ = false;
     f32 drag_grab_ = 0.0f;
 };

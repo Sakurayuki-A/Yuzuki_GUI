@@ -5,14 +5,19 @@
 
 namespace yzk {
 
+Application* Application::s_instance_ = nullptr;
+
 Application::Application() {
+    s_instance_ = this;
     instance_ = GetModuleHandleW(nullptr);
     if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
         SetProcessDPIAware();
     }
 }
 
-Application::~Application() = default;
+Application::~Application() {
+    if (s_instance_ == this) s_instance_ = nullptr;
+}
 
 Application& Application::instance() {
     static Application app;
@@ -95,6 +100,13 @@ void Application::remove_window(Window* window) {
         quitting_ = true;
         PostQuitMessage(exit_code_);
     }
+}
+
+void Application::invalidate_all_windows() {
+    // Static entry (used by Theme::set): no-op before the first Application exists,
+    // avoiding instance() which would construct one as a side effect.
+    if (!s_instance_) return;
+    for (Window* window : s_instance_->windows_) window->invalidate_all();
 }
 
 }  // namespace yzk

@@ -3,6 +3,7 @@
 #include <yuzuki/ui/paint.hpp>
 #include <yuzuki/ui/overlay.hpp>
 
+#include <functional>
 #include <vector>
 
 namespace yzk {
@@ -13,26 +14,42 @@ public:
     explicit ComboBox(std::vector<String> items);
     ~ComboBox() override;
 
-    void set_items(std::vector<String> items);
+    ComboBox& set_items(std::vector<String> items);
     const std::vector<String>& items() const { return items_; }
-    void clear_items();
+    ComboBox& clear_items();
 
     i32 selected_index() const { return selected_; }
-    void set_selected_index(i32 index);
+    ComboBox& set_selected_index(i32 index);
     const String& selected_text() const;
     bool has_selection() const { return selected_ >= 0; }
 
     bool is_open() const;
-    void open_popup();
-    void close_popup();
+    ComboBox& open_popup();
+    ComboBox& close_popup();
 
-    void set_placeholder(String placeholder) { placeholder_ = std::move(placeholder); }
+    ComboBox& set_placeholder(String placeholder) {
+        placeholder_ = std::move(placeholder);
+        return *this;
+    }
     const String& placeholder() const { return placeholder_; }
 
-    void set_width(f32 width) { width_ = width; }
+    ComboBox& set_width(f32 width) {
+        width_ = width;
+        return *this;
+    }
     f32 width() const { return width_; }
 
-    virtual void on_change(i32 index) { (void)index; }
+    // Convenience callback registration; the virtual hook below is invoked with it.
+    ComboBox& set_on_change(std::function<void(i32)> cb) {
+        on_change_cb_ = std::move(cb);
+        return *this;
+    }
+    // Fluent short name (Lego-style); same as set_on_change.
+    ComboBox& on_change(std::function<void(i32)> cb) { return set_on_change(std::move(cb)); }
+
+    virtual void on_change(i32 index) {
+        if (on_change_cb_) on_change_cb_(index);
+    }
 
     Size measure_impl(Size available, const PaintContext* ctx) override;
     void paint_impl(PaintContext& ctx) override;
@@ -46,6 +63,7 @@ private:
     f32 width_ = 160.0f;
     String placeholder_ = "Select...";
     Popup* popup_ = nullptr;
+    std::function<void(i32)> on_change_cb_;
 };
 
 }  // namespace yzk

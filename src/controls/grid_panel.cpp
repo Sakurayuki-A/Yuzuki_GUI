@@ -19,44 +19,77 @@ void GridPanel::add(Widget* child, i32 col, i32 row, i32 col_span, i32 row_span)
     slots_.push_back(GridSlot{child, col, row, col_span, row_span});
 }
 
-void GridPanel::set_gap(f32 gap) {
-    if (gap_ == gap) return;
+GridPanel& GridPanel::set_gap(f32 gap) {
+    if (gap_ == gap) return *this;
     gap_ = gap;
     invalidate();
+    return *this;
 }
 
-void GridPanel::set_column_auto(i32 col) {
-    if (col < 0 || col >= columns_) return;
+GridPanel& GridPanel::set_column_auto(i32 col) {
+    if (col < 0 || col >= columns_) return *this;
     col_lengths_[static_cast<size_t>(col)] = GridLength{};
     invalidate();
+    return *this;
 }
 
-void GridPanel::set_column_star(i32 col, f32 weight) {
-    if (col < 0 || col >= columns_) return;
+GridPanel& GridPanel::set_column_star(i32 col, f32 weight) {
+    if (col < 0 || col >= columns_) return *this;
     GridLength len;
     len.type = GridLength::Type::Star;
     len.weight = weight > 0.0f ? weight : 1.0f;
     col_lengths_[static_cast<size_t>(col)] = len;
     invalidate();
+    return *this;
 }
 
-void GridPanel::set_row_auto(i32 row) {
-    if (row < 0 || row >= rows_) return;
+GridPanel& GridPanel::set_row_auto(i32 row) {
+    if (row < 0 || row >= rows_) return *this;
     row_lengths_[static_cast<size_t>(row)] = GridLength{};
     invalidate();
+    return *this;
 }
 
-void GridPanel::set_row_star(i32 row, f32 weight) {
-    if (row < 0 || row >= rows_) return;
+GridPanel& GridPanel::set_row_star(i32 row, f32 weight) {
+    if (row < 0 || row >= rows_) return *this;
     GridLength len;
     len.type = GridLength::Type::Star;
     len.weight = weight > 0.0f ? weight : 1.0f;
     row_lengths_[static_cast<size_t>(row)] = len;
     invalidate();
+    return *this;
+}
+
+GridPanel& GridPanel::set_column_fixed(i32 col, f32 width) {
+    if (col < 0 || col >= columns_) return *this;
+    GridLength len;
+    len.type = GridLength::Type::Fixed;
+    len.value = width > 0.0f ? width : 0.0f;
+    col_lengths_[static_cast<size_t>(col)] = len;
+    invalidate();
+    return *this;
+}
+
+GridPanel& GridPanel::set_row_fixed(i32 row, f32 height) {
+    if (row < 0 || row >= rows_) return *this;
+    GridLength len;
+    len.type = GridLength::Type::Fixed;
+    len.value = height > 0.0f ? height : 0.0f;
+    row_lengths_[static_cast<size_t>(row)] = len;
+    invalidate();
+    return *this;
+}
+
+// Apply Fixed overrides after content collection: a fixed track's extent is exact and
+// never derives from the children placed in it.
+void GridPanel::apply_fixed(std::vector<f32>& widths, const std::vector<GridLength>& lengths) {
+    for (size_t c = 0; c < lengths.size() && c < widths.size(); ++c) {
+        if (lengths[c].type == GridLength::Type::Fixed) widths[c] = lengths[c].value;
+    }
 }
 
 void GridPanel::collect_content(std::vector<f32>& col_w, std::vector<f32>& row_h,
-                               const PaintContext* ctx) const {
+                                const PaintContext* ctx) const {
     col_w.assign(static_cast<size_t>(columns_), 0.0f);
     row_h.assign(static_cast<size_t>(rows_), 0.0f);
     for (const GridSlot& slot : slots_) {
@@ -82,6 +115,8 @@ void GridPanel::collect_content(std::vector<f32>& col_w, std::vector<f32>& row_h
             if (per_row > row_h[r]) row_h[r] = per_row;
         }
     }
+    apply_fixed(col_w, col_lengths_);
+    apply_fixed(row_h, row_lengths_);
 }
 
 Size GridPanel::measure_content(Size available, const PaintContext* ctx) {

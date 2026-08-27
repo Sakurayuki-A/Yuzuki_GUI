@@ -148,26 +148,32 @@ ComboBox::~ComboBox() {
     }
 }
 
-void ComboBox::set_items(std::vector<String> items) {
+ComboBox& ComboBox::set_items(std::vector<String> items) {
     items_ = std::move(items);
     if (selected_ >= static_cast<i32>(items_.size())) {
         selected_ = -1;
     }
     invalidate();
+    return *this;
 }
 
-void ComboBox::clear_items() {
+ComboBox& ComboBox::clear_items() {
     items_.clear();
     selected_ = -1;
     invalidate();
+    return *this;
 }
 
-void ComboBox::set_selected_index(i32 index) {
-    if (index < -1 || index >= static_cast<i32>(items_.size())) return;
-    if (selected_ == index) return;
+ComboBox& ComboBox::set_selected_index(i32 index) {
+    if (index < -1 || index >= static_cast<i32>(items_.size())) return *this;
+    if (selected_ == index) return *this;
     selected_ = index;
     invalidate();
-    if (index >= 0) on_change(index);
+    // Only notify once attached to a Window. During construction / before the widget
+    // tree is connected, window() is null and an on_change callback that reaches into
+    // uninitialized siblings (e.g. another widget's selected state) would be unsafe.
+    if (index >= 0 && window()) on_change(index);
+    return *this;
 }
 
 const String& ComboBox::selected_text() const {
@@ -180,9 +186,9 @@ bool ComboBox::is_open() const {
     return popup_ && popup_->is_open();
 }
 
-void ComboBox::open_popup() {
+ComboBox& ComboBox::open_popup() {
     Window* win = window();
-    if (!win || is_open() || items_.empty()) return;
+    if (!win || is_open() || items_.empty()) return *this;
 
     const RectF g = global_bounds();
     const u32 rows = std::min<u32>(static_cast<u32>(items_.size()), static_cast<u32>(kMaxRows));
@@ -200,13 +206,15 @@ void ComboBox::open_popup() {
     popup_->set_panel_rect(RectF::make(x, y, g.width(), list_h));
     popup_->show(*win);
     invalidate();
+    return *this;
 }
 
-void ComboBox::close_popup() {
+ComboBox& ComboBox::close_popup() {
     if (popup_ && popup_->is_open()) {
         popup_->close();
         invalidate();
     }
+    return *this;
 }
 
 Size ComboBox::measure_impl(Size available, const PaintContext* ctx) {

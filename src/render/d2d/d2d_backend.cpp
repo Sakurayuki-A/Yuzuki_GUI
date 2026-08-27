@@ -12,10 +12,6 @@ D2DBackend::~D2DBackend() {
     destroy_target();
 }
 
-BackendInfo D2DBackend::info() const {
-    return BackendInfo{"Direct2D", 1, 1};
-}
-
 bool D2DBackend::create_target(void* native_window, u32 width_px, u32 height_px, u32 dpi) {
     hwnd_ = static_cast<HWND>(native_window);
     width_px_ = width_px;
@@ -226,7 +222,7 @@ void D2DBackend::set_dpi(u32 dpi) {
     }
 }
 
-bool D2DBackend::begin_frame(const Color& clear, const RectF* clip_dip) {
+bool D2DBackend::begin_frame(const Color& clear) {
     if (!context_ || !target_bitmap_ || !layer_ || drawing_) return false;
     backdrop_regions_.clear();
     // Render deferred shadow bitmaps here, before BeginDraw: nested SetTarget +
@@ -244,6 +240,12 @@ bool D2DBackend::begin_frame(const Color& clear, const RectF* clip_dip) {
     context_->BeginDraw();
     context_->SetTransform(D2D1::IdentityMatrix());
     context_->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    // Grayscale text AA is deliberate, not an override for its own sake: ClearType's
+    // per-channel coverage assumes glyphs blend straight onto the physical pixel grid.
+    // Rendered into our intermediate layer and composited 1:1, the R/B fringes survive
+    // as colored speckles along glyph edges on many panels. Grayscale + device-pixel
+    // origin snapping (see draw_text) is the crisp-and-clean combination for a
+    // composited-UI pipeline (same tradeoff WPF makes).
     context_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
     // Sanity: the visual transform/layer stacks should be empty (push/pop are paired);
     // clear leftovers to avoid cross-frame bleed.
@@ -252,12 +254,6 @@ bool D2DBackend::begin_frame(const Color& clear, const RectF* clip_dip) {
 
     const D2D1_COLOR_F clear_color = to_d2d(clear);
     context_->Clear(&clear_color);
-
-    if (clip_dip) {
-        D2D1_RECT_F clip = to_d2d(*clip_dip);
-        context_->PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-        clip_pushed_ = true;
-    }
     return true;
 }
 
@@ -271,6 +267,7 @@ bool D2DBackend::begin_partial_frame(const Color& clear) {
     context_->BeginDraw();
     context_->SetTransform(D2D1::IdentityMatrix());
     context_->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    // Same rationale as begin_frame: grayscale text AA for the composited pipeline.
     context_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
     // Sanity: the visual transform/layer stacks should be empty (push/pop are paired);
     // clear leftovers to avoid cross-frame bleed.
@@ -430,4 +427,5 @@ bool D2DBackend::ensure_brush(const Color& color) {
 }
 
 }  // namespace yzk
+
 

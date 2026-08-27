@@ -71,8 +71,8 @@ Window* Widget::window() const {
     return w->is_window() ? static_cast<Window*>(const_cast<Widget*>(w)) : nullptr;
 }
 
-void Widget::set_bounds(const RectF& rect) {
-    if (bounds_ == rect) return;
+Widget& Widget::set_bounds(const RectF& rect) {
+    if (bounds_ == rect) return *this;
     RectF old = bounds_;
     bounds_ = rect;
     invalidate_area(old);
@@ -82,22 +82,24 @@ void Widget::set_bounds(const RectF& rect) {
         Window* win = window();
         if (win) win->invalidate_area(painted_bounds_);
     }
+    return *this;
 }
 
-void Widget::set_position(f32 x, f32 y) {
-    set_bounds(RectF::make(x, y, width(), height()));
+Widget& Widget::set_position(f32 x, f32 y) {
+    return set_bounds(RectF::make(x, y, width(), height()));
 }
 
-void Widget::set_size(f32 w, f32 h) {
-    set_bounds(RectF::make(bounds_.left, bounds_.top, w, h));
+Widget& Widget::set_size(f32 w, f32 h) {
+    return set_bounds(RectF::make(bounds_.left, bounds_.top, w, h));
 }
 
-void Widget::set_draggable(bool draggable) {
+Widget& Widget::set_draggable(bool draggable) {
     if (draggable) {
         add_flag(Flag_Draggable);
     } else {
         remove_flag(Flag_Draggable);
     }
+    return *this;
 }
 
 // ===== Visual transforms & opacity =====
@@ -152,7 +154,7 @@ void Widget::invalidate_visual() {
     }
 }
 
-void Widget::set_transition(f32 ms) {
+Widget& Widget::set_transition(f32 ms) {
     transition_ms_ = ms < 0.0f ? 0.0f : ms;
     opacity_.set_transition(transition_ms_);
     translate_x_.set_transition(transition_ms_);
@@ -160,25 +162,30 @@ void Widget::set_transition(f32 ms) {
     rotate_deg_.set_transition(transition_ms_);
     scale_x_.set_transition(transition_ms_);
     scale_y_.set_transition(transition_ms_);
+    return *this;
 }
 
-void Widget::set_opacity(f32 opacity) {
+Widget& Widget::set_opacity(f32 opacity) {
     opacity = opacity < 0.0f ? 0.0f : (opacity > 1.0f ? 1.0f : opacity);
     opacity_.set_animated(opacity);
+    return *this;
 }
 
-void Widget::set_translate(f32 dx, f32 dy) {
+Widget& Widget::set_translate(f32 dx, f32 dy) {
     translate_x_.set_animated(dx);
     translate_y_.set_animated(dy);
+    return *this;
 }
 
-void Widget::set_rotate_deg(f32 degrees) {
+Widget& Widget::set_rotate_deg(f32 degrees) {
     rotate_deg_.set_animated(degrees);
+    return *this;
 }
 
-void Widget::set_scale(f32 sx, f32 sy) {
+Widget& Widget::set_scale(f32 sx, f32 sy) {
     scale_x_.set_animated(sx);
     scale_y_.set_animated(sy);
+    return *this;
 }
 
 RectF Widget::global_bounds() const {
@@ -191,9 +198,9 @@ RectF Widget::global_bounds() const {
     return r;
 }
 
-void Widget::set_visible(bool visible) {
+Widget& Widget::set_visible(bool visible) {
     const bool was = (flags_ & Flag_Visible) != 0;
-    if (was == visible) return;
+    if (was == visible) return *this;
     if (visible) {
         flags_ |= Flag_Visible;
     } else {
@@ -202,11 +209,12 @@ void Widget::set_visible(bool visible) {
         remove_flag(Flag_Pressed);
     }
     invalidate();
+    return *this;
 }
 
-void Widget::set_enabled(bool enabled) {
+Widget& Widget::set_enabled(bool enabled) {
     const bool was = (flags_ & Flag_Enabled) != 0;
-    if (was == enabled) return;
+    if (was == enabled) return *this;
     if (enabled) {
         flags_ |= Flag_Enabled;
     } else {
@@ -215,19 +223,27 @@ void Widget::set_enabled(bool enabled) {
         remove_flag(Flag_Pressed);
     }
     invalidate();
+    return *this;
 }
 
-void Widget::set_focusable(bool focusable) {
+Widget& Widget::set_focusable(bool focusable) {
     if (focusable) {
         flags_ |= Flag_Focusable;
     } else {
         flags_ &= ~Flag_Focusable;
     }
+    return *this;
 }
 
 Size Widget::measure(Size available, const PaintContext* ctx) {
     last_measure_pass_ = g_layout_pass;
+#ifdef _DEBUG
+    const auto t0 = std::chrono::steady_clock::now();
+#endif
     Size s = measure_impl(available, ctx);
+#ifdef _DEBUG
+    measure_ms_ += std::chrono::duration<f32, std::milli>(std::chrono::steady_clock::now() - t0).count();
+#endif
     if (s.width < min_size_.width) s.width = min_size_.width;
     if (s.height < min_size_.height) s.height = min_size_.height;
     if (s.width > max_size_.width) s.width = max_size_.width;
@@ -249,13 +265,14 @@ void Widget::perform_layout(const PaintContext* ctx) {
     Widget* child = first_child();
     while (child) {
         if (child->visible()) {
-            if (child->last_measure_pass_ != g_layout_pass) {
-                child->measure(bounds_.size(), ctx);
-            }
-            // Only fill children not yet laid out (empty bounds); manually
-            // positioned children (set_bounds) must not be stretched
-            if (child->bounds().empty()) {
-                child->set_bounds(bounds_);
+            // Floating children skip arrangement but still get their own layout pass.
+            if (child->participates_in_layout()) {
+                if (child->last_measure_pass_ != g_layout_pass) {
+                    child->measure(bounds_.size(), ctx);
+                }
+                if (child->bounds().empty()) {
+                    child->set_bounds(bounds_);
+                }
             }
             child->perform_layout(ctx);
         }
@@ -268,6 +285,7 @@ void Widget::paint(PaintContext& ctx) {
     // damage rects, so partial-repaint CPU cost scales with damage size, not UI size.
     if (ctx.paint_culled(this)) return;
     if (opacity_.value() <= 0.0f) return;  // fully transparent: nothing to draw
+    ctx.set_source(this);
     ctx.begin_widget();
     const bool visual = has_visual_state();
     if (visual) ctx.push_visual(visual_transform(), opacity_.value());
@@ -333,6 +351,11 @@ void Widget::invalidate_area(const RectF& rect) {
         w = w->parent_;
     }
     win->invalidate_area(rect.translated(ox, oy));
+}
+
+void Widget::reset_painted_bounds() {
+    painted_bounds_ = bounds_;
+    self_painted_bounds_ = bounds_;
 }
 
 void Widget::request_focus() {

@@ -3,52 +3,75 @@
 
 namespace yzk {
 
-void Box::set_bg(const Color& color) {
-    if (bg_ == color) return;
+Box& Box::set_bg(const Color& color) {
+    if (bg_ == color) return *this;
     bg_ = color;
     invalidate();
+    return *this;
 }
 
-void Box::set_radius(f32 radius) {
-    if (radius_ == radius) return;
+Box& Box::set_bg_role(ThemeRole role) {
+    if (has_bg_role_ && bg_role_ == role) return *this;
+    bg_role_ = role;
+    has_bg_role_ = true;
+    invalidate();
+    return *this;
+}
+
+Box& Box::clear_bg_role() {
+    if (!has_bg_role_) return *this;
+    has_bg_role_ = false;
+    invalidate();
+    return *this;
+}
+
+Box& Box::set_radius(f32 radius) {
+    if (radius_ == radius) return *this;
     radius_ = radius;
     invalidate();
+    return *this;
 }
 
-void Box::set_border_width(f32 width) {
-    if (border_width_ == width) return;
+Box& Box::set_border_width(f32 width) {
+    if (border_width_ == width) return *this;
     border_width_ = width;
     invalidate();
+    return *this;
 }
 
-void Box::set_border_color(const Color& color) {
-    if (border_color_ == color) return;
+Box& Box::set_border_color(const Color& color) {
+    if (border_color_ == color) return *this;
     border_color_ = color;
     invalidate();
+    return *this;
 }
 
-void Box::set_border(f32 width, const Color& color) {
+Box& Box::set_border(f32 width, const Color& color) {
     set_border_width(width);
     set_border_color(color);
+    return *this;
 }
 
-void Box::set_padding(f32 padding) {
-    if (padding_ == padding) return;
+Box& Box::set_padding(f32 padding) {
+    if (padding_ == padding) return *this;
     padding_ = padding;
     invalidate();
+    return *this;
 }
 
-void Box::set_shadow(f32 blur, f32 offset_y) {
-    if (shadow_blur_ == blur && shadow_offset_y_ == offset_y) return;
+Box& Box::set_shadow(f32 blur, f32 offset_y) {
+    if (shadow_blur_ == blur && shadow_offset_y_ == offset_y) return *this;
     shadow_blur_ = blur;
     shadow_offset_y_ = offset_y;
     invalidate();
+    return *this;
 }
 
-void Box::set_shadow_color(const Color& color) {
-    if (shadow_color_ == color) return;
+Box& Box::set_shadow_color(const Color& color) {
+    if (shadow_color_ == color) return *this;
     shadow_color_ = color;
     invalidate();
+    return *this;
 }
 
 Size Box::measure_impl(Size available, const PaintContext* ctx) {
@@ -76,7 +99,7 @@ void Box::perform_layout(const PaintContext* ctx) {
 
 RectF Box::content_area() const {
     const f32 p = padding_;
-    return RectF::make(bounds_.left + p, bounds_.top + p,
+    return RectF::make(p, p,
                        bounds_.width() - p * 2.0f, bounds_.height() - p * 2.0f);
 }
 
@@ -86,11 +109,14 @@ void Box::paint_impl(PaintContext& ctx) {
         ctx.draw_shadow(b.translated(0.0f, shadow_offset_y_), radius_, shadow_blur_,
                         shadow_color_);
     }
-    if (!bg_.is_transparent()) {
+    // Semantic role color is resolved per-paint, so theme swaps re-skin the box
+    // without invalidating anything explicitly.
+    const Color bg = has_bg_role_ ? theme_color(ctx.theme(), bg_role_) : bg_;
+    if (!bg.is_transparent()) {
         if (radius_ > 0.0f) {
-            ctx.fill_rounded(b, bg_, radius_);
+            ctx.fill_rounded(b, bg, radius_);
         } else {
-            ctx.fill_rect(b, bg_);
+            ctx.fill_rect(b, bg);
         }
     }
     if (border_width_ > 0.0f && !border_color_.is_transparent()) {

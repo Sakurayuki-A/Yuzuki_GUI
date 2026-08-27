@@ -13,21 +13,23 @@ Slider::Slider() {
     set_focusable(true);
 }
 
-void Slider::set_range(f32 min, f32 max) {
+Slider& Slider::set_range(f32 min, f32 max) {
     if (max < min) max = min;
     min_ = min;
     max_ = max;
     if (value_ < min_) value_ = min_;
     if (value_ > max_) value_ = max_;
     invalidate();
+    return *this;
 }
 
-void Slider::set_value(f32 value) {
+Slider& Slider::set_value(f32 value) {
     if (value < min_) value = min_;
     if (value > max_) value = max_;
-    if (value_ == value) return;
+    if (value_ == value) return *this;
     value_ = value;
     invalidate();
+    return *this;
 }
 
 Size Slider::measure_impl(Size available, const PaintContext* ctx) {

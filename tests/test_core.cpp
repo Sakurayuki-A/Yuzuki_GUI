@@ -383,10 +383,10 @@ void test_box() {
     box.append_child(&child);
     box.set_bounds(RectF::make(5.0f, 5.0f, 100.0f, 60.0f));
     box.perform_layout();
-    // Content area = bounds minus padding
-    CHECK(box.content_area() == RectF::make(15.0f, 15.0f, 80.0f, 40.0f));
-    // Child fills the content area
-    CHECK(child.bounds() == RectF::make(15.0f, 15.0f, 80.0f, 40.0f));
+    // Content area = local coords (padding, padding, inner_w, inner_h)
+    CHECK(box.content_area() == RectF::make(10.0f, 10.0f, 80.0f, 40.0f));
+    // Child fills the content area (local coords)
+    CHECK(child.bounds() == RectF::make(10.0f, 10.0f, 80.0f, 40.0f));
     CHECK(box.radius() == 8.0f && box.bg().r == 0xff);
     CHECK(box.border_width() == 0.0f);
     // Border/shadow properties
@@ -722,6 +722,222 @@ void test_list_view_data_source() {
     CHECK(lv.row_delegate() == nullptr);
 }
 
+// ---------------------------------------------------------------------------
+// Lifecycle stress: the frame must stay safe across dynamic add/remove,
+// destroyed-widget re-attach, cascading destruction, and callback re-entry.
+// These validate the current ownership model (raw pointers + parent/unparent),
+// NOT by switching to shared_ptr/unique_ptr.
+// ---------------------------------------------------------------------------
+
+// A parent that auto-deletes its children on destruction — the model apps rely
+// on to keep heap widgets alive for the widget tree's lifetime.
+class OwningWidget : public Widget {
+public:
+    ~OwningWidget() {
+        Widget* child = first_child();
+        while (child) {
+            Widget* next = child->next_sibling();
+            delete child;
+            child = next;
+        }
+    }
+};
+
+static int g_lifecycle_callback_hits = 0;
+
+// Owns its on_click-style callback so we can observe callback lifetime.
+class CallbackHolder : public Widget {
+public:
+    std::function<void()> cb;
+};
+
+void test_lifecycle_dynamic_add_remove() {
+    OwningWidget root;
+
+    // Add / remove children repeatedly. Each removal detaches and, because
+    // root owns them, destroys the widget. The tree must stay consistent.
+    for (int i = 0; i < 50; ++i) {
+        auto* box = new FixedWidget(Size{10.0f, 10.0f});
+        root.append_child(box);
+        box->remove_from_parent();
+        delete box;
+    }
+    CHECK(root.first_child() == nullptr);
+    CHECK(root.last_child() == nullptr);
+
+    // A set of mid-list removals (listview rows) must not walk a dangling sibling.
+    std::vector<FixedWidget*> rows;
+    for (int i = 0; i < 10; ++i) {
+        auto* row = new FixedWidget(Size{50.0f, 10.0f});
+        root.append_child(row);
+        rows.push_back(row);
+    }
+    // Detach the middle rows first, then the edges, to stress sibling relinking.
+    for (int i = 3; i < 7; ++i) rows[i]->remove_from_parent();
+    // Deleting the still-attached rows must auto-detach them (via ~Widget)
+    // without leaving dangling sibling pointers in the root.
+    for (auto* r : rows) delete r;
+    CHECK(root.first_child() == nullptr);
+
+    // After full cleardown, re-attaching fresh widgets works again.
+    auto* again = new FixedWidget(Size{5.0f, 5.0f});
+    root.append_child(again);
+    CHECK(root.first_child() == again);
+    delete again;
+}
+
+void test_lifecycle_callback_dangling() {
+    OwningWidget root;
+
+    // A widget that fires a captured callback; the callback captures the
+    // widget itself. If the widget is destroyed without clearing the callback,
+    // invoking it would be a use-after-free — so the frame must guarantee the
+    // callback is dead before the widget dies.
+    {
+        auto* btn = new CallbackHolder;
+        g_lifecycle_callback_hits = 0;
+        btn->cb = [btn]() { ++g_lifecycle_callback_hits; };
+        btn->cb();  // live callback fires
+        CHECK(g_lifecycle_callback_hits == 1);
+        root.append_child(btn);
+
+        btn->remove_from_parent();  // detach
+        // Destroy the widget; the captured `btn` must not be invoked after this.
+        delete btn;
+        CHECK(root.first_child() == nullptr);
+    }
+    // No further callback can run; the counter must stay untouched.
+    CHECK(g_lifecycle_callback_hits == 1);
+
+    // Re-create a similar holder on a fresh root, then destroy the root while
+    // a callback is still captured. Destructor chains via OwningWidget.
+    g_lifecycle_callback_hits = 0;
+    {
+        OwningWidget second_root;
+        auto* holder = new CallbackHolder;
+        holder->cb = []() { ++g_lifecycle_callback_hits; };
+        second_root.append_child(holder);
+    }  // second_root destroyed; its child is deleted by the owning destructor
+    CHECK(g_lifecycle_callback_hits == 0);  // nothing ever invoked it
+}
+
+void test_lifecycle_cascading_destroy() {
+    OwningWidget root;
+
+    // Build a 3-level tree: root -> panel -> leafs. Destroy the middle panel
+    // (which is owned by root) and confirm the whole subtree is gone and the
+    // root's child list no longer points at anything dangling.
+    auto* panel = new OwningWidget;
+    {
+        auto* leaf1 = new CallbackHolder;
+        panel->append_child(leaf1);
+        auto* leaf2 = new CallbackHolder;
+        panel->append_child(leaf2);
+    }
+    root.append_child(panel);
+    CHECK(root.first_child() == panel);
+    CHECK(root.last_child() == panel);
+
+    panel->remove_from_parent();
+    delete panel;
+    CHECK(root.first_child() == nullptr);
+    CHECK(root.last_child() == nullptr);
+
+    // A second cascade: root -> a -> b -> c, delete a, ensure b's child c is
+    // detached too (clear_children on b is exercised by ~OwningWidget).
+    {
+        auto* a = new OwningWidget;
+        auto* b = new OwningWidget;
+        auto* c = new FixedWidget(Size{9.0f, 9.0f});
+        a->append_child(b);
+        b->append_child(c);
+        root.append_child(a);
+        CHECK(c->parent() == b);
+        a->remove_from_parent();
+        delete a;  // tears down a -> b -> c
+        CHECK(root.first_child() == nullptr);
+    }
+}
+
+void test_lifecycle_high_frequency() {
+    OwningWidget root;
+
+    // Mixed churn: add 100, delete middles, complete half, clear all, re-add.
+    std::vector<FixedWidget*> all;
+    for (int i = 0; i < 100; ++i) {
+        auto* w = new FixedWidget(Size{20.0f, 8.0f});
+        root.append_child(w);
+        all.push_back(w);
+    }
+    CHECK(root.first_child() != nullptr);
+
+    // Delete the middle 50 (detach + destroy), keeping the tree valid.
+    for (int i = 25; i < 75; ++i) {
+        all[i]->remove_from_parent();
+        delete all[i];
+    }
+    CHECK(root.first_child() != nullptr);
+
+    // Remove every remaining one; the root must end empty and stable.
+    Widget* cur = root.first_child();
+    while (cur) {
+        Widget* next = cur->next_sibling();
+        cur->remove_from_parent();
+        delete cur;
+        cur = next;
+    }
+    CHECK(root.first_child() == nullptr);
+    CHECK(root.last_child() == nullptr);
+}
+
+// Real Window-context teardown: the path every app hits — a subtree is mounted
+// under a Window, the window holds state pointers into it (focus, timers), then a
+// child is destroyed while body code may still hold its raw pointer.
+// detach_widget() runs from ~Widget and must leave the window free of dangling
+// pointers; set_root() must fully unmount an old root. The Window is deliberately
+// NOT created (no HWND): D2DBackend is lazy, and detach/set_focus/timer paths
+// all guard on hwnd_ so the pure-logic paths run identically.
+void test_lifecycle_window_teardown() {
+    {  // scope 1: focus target deleted while mounted under the window
+        Window win("lc", 400, 300);
+        OwningWidget root;
+
+        auto* focus_target = new FixedWidget(Size{10.0f, 10.0f});
+        auto* hover_target = new FixedWidget(Size{10.0f, 10.0f});
+        root.append_child(focus_target);
+        root.append_child(hover_target);
+        win.set_root(&root);
+
+        win.set_focus(focus_target);
+        CHECK(win.focused() == focus_target);
+        CHECK(root.parent() == &win);
+
+        // App-side deletion of a live control: ~Widget -> window()->detach_widget
+        // must null out focused_ so the window never dispatches to it.
+        delete focus_target;
+        CHECK(win.focused() == nullptr);
+        delete hover_target;
+        // Root still carries no destroyed children.
+        CHECK(root.first_child() == nullptr);
+    }
+
+    {  // scope 2: root swapped under a live window; old root released safely
+        Window win("lc2", 400, 300);
+        auto* old_root = new OwningWidget;
+        auto* kept_child = new FixedWidget(Size{5.0f, 5.0f});
+        old_root->append_child(kept_child);
+        win.set_root(old_root);
+        CHECK(old_root->parent() == &win);
+
+        auto* new_root = new Widget;
+        win.set_root(new_root);
+        // Old root was detached from the window and is free for app-side teardown.
+        CHECK(old_root->parent() == nullptr);
+        win.set_root(nullptr);
+        CHECK(new_root->parent() == nullptr);
+    }
+}
+
 void test_visual_footprint() {
     Widget parent;
     parent.set_bounds(RectF::make(10.0f, 20.0f, 100.0f, 100.0f));
@@ -733,6 +949,36 @@ void test_visual_footprint() {
     // Visual footprint follows a translation (transform around center)
     child.set_translate(10.0f, 0.0f);
     CHECK(child.visual_footprint() == RectF::make(25.0f, 26.0f, 30.0f, 40.0f));
+}
+
+// GridPanel: Fixed tracks take their exact extent, Star splits the leftover.
+void test_grid_fixed() {
+    GridPanel grid(3, 1);
+    grid.set_gap(0.0f);
+    grid.set_column_fixed(0, 50.0f);
+
+    FixedWidget auto_child(Size{40.0f, 20.0f});   // col 1 (auto)
+    FixedWidget star_child(Size{40.0f, 20.0f});   // col 2 (star)
+    grid.add(&auto_child, 1, 0);
+    grid.add(&star_child, 2, 0);
+    grid.set_column_star(2, 1.0f);
+
+    grid.set_bounds(RectF::make(0.0f, 0.0f, 300.0f, 40.0f));
+    grid.perform_layout();
+
+    CHECK(std::abs(auto_child.bounds().left - 50.0f) < 0.01f);          // after fixed col
+    CHECK(std::abs(auto_child.bounds().width() - 40.0f) < 0.01f);       // auto = content
+    CHECK(std::abs(star_child.bounds().left - 90.0f) < 0.01f);
+    CHECK(std::abs(star_child.bounds().width() - 210.0f) < 0.01f);      // 300 - 50 - 40
+
+    // A child in the fixed column is clipped to it, not stretched by content.
+    FixedWidget wide_in_fixed(Size{200.0f, 20.0f});
+    GridPanel grid2(1, 1);
+    grid2.set_column_fixed(0, 60.0f);
+    grid2.add(&wide_in_fixed, 0, 0);
+    grid2.set_bounds(RectF::make(0.0f, 0.0f, 400.0f, 40.0f));
+    grid2.perform_layout();
+    CHECK(std::abs(wide_in_fixed.bounds().width() - 60.0f) < 0.01f);
 }
 
 }  // namespace
@@ -761,7 +1007,13 @@ int main() {
     test_combo_box();
     test_list_view();
     test_list_view_data_source();
+    test_lifecycle_dynamic_add_remove();
+    test_lifecycle_callback_dangling();
+    test_lifecycle_cascading_destroy();
+    test_lifecycle_high_frequency();
+    test_lifecycle_window_teardown();
     test_visual_footprint();
+    test_grid_fixed();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -9,13 +9,13 @@ public:
     BackdropBlur() = default;
 
     f32 blur() const { return blur_; }
-    void set_blur(f32 blur);
+    BackdropBlur& set_blur(f32 blur);
 
     const Color& tint() const { return tint_; }
-    void set_tint(const Color& tint);
+    BackdropBlur& set_tint(const Color& tint);
 
     f32 corner_radius() const { return corner_radius_; }
-    void set_corner_radius(f32 radius);
+    BackdropBlur& set_corner_radius(f32 radius);
 
     Size measure_impl(Size available, const PaintContext* ctx) override;
     void paint_impl(PaintContext& ctx) override;

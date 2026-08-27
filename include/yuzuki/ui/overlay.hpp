@@ -43,6 +43,8 @@ protected:
     void paint_impl(PaintContext& ctx) override;
     void on_event(Event& e) override;
     void perform_layout(const PaintContext* ctx = nullptr) override;
+    // Full-window dimmer that positions its own panel; parent layouts must not touch it.
+    bool participates_in_layout() const override { return false; }
 
 private:
     void finish_close();

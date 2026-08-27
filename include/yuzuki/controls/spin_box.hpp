@@ -2,6 +2,8 @@
 #include <yuzuki/controls/text_box.hpp>
 #include <yuzuki/ui/paint.hpp>
 
+#include <functional>
+
 namespace yzk {
 
 class SpinBox : public TextBox {
@@ -10,25 +12,41 @@ public:
     SpinBox(f64 value, f64 min, f64 max, f64 step);
 
     f64 value() const { return value_; }
-    void set_value(f64 value);
+    SpinBox& set_value(f64 value);
 
-    void set_range(f64 min, f64 max);
+    SpinBox& set_range(f64 min, f64 max);
     f64 minimum() const { return min_; }
     f64 maximum() const { return max_; }
 
-    void set_step(f64 step) { step_ = step; }
+    SpinBox& set_step(f64 step) {
+        step_ = step;
+        return *this;
+    }
     f64 step() const { return step_; }
 
-    void set_decimals(i32 decimals) {
+    SpinBox& set_decimals(i32 decimals) {
         decimals_ = decimals;
         sync_text();
+        return *this;
     }
     i32 decimals() const { return decimals_; }
 
-    void set_spin_width(f32 width) { spin_width_ = width; }
+    SpinBox& set_spin_width(f32 width) {
+        spin_width_ = width;
+        return *this;
+    }
     f32 spin_width() const { return spin_width_; }
 
-    virtual void on_value_changed(f64 value) { (void)value; }
+    // Convenience callback registration; the virtual hook below is invoked with it.
+    SpinBox& set_on_value_changed(std::function<void(f64)> cb) {
+        on_value_changed_cb_ = std::move(cb);
+        return *this;
+    }
+    SpinBox& on_value_changed(std::function<void(f64)> cb) { return set_on_value_changed(std::move(cb)); }
+
+    virtual void on_value_changed(f64 value) {
+        if (on_value_changed_cb_) on_value_changed_cb_(value);
+    }
 
     Size measure_impl(Size available, const PaintContext* ctx) override;
     void paint_impl(PaintContext& ctx) override;
@@ -47,6 +65,7 @@ private:
     f32 spin_width_ = 26.0f;
     bool hover_up_ = false;
     bool hover_down_ = false;
+    std::function<void(f64)> on_value_changed_cb_;
 };
 
 }  // namespace yzk

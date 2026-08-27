@@ -14,12 +14,6 @@ Button::Button(String text) : text_(std::move(text)) {
     set_focusable(true);
 }
 
-void Button::set_text(const String& text) {
-    if (text_ == text) return;
-    text_ = text;
-    invalidate();
-}
-
 Size Button::measure_impl(Size available, const PaintContext* ctx) {
     (void)available;
     (void)ctx;

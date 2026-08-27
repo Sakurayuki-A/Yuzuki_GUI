@@ -4,6 +4,10 @@
 #include <yuzuki/ui/animation.hpp>
 #include <yuzuki/ui/theme.hpp>
 
+#include <new>
+#include <type_traits>
+#include <utility>
+
 namespace yzk {
 
 extern u64 g_layout_pass;
@@ -39,8 +43,28 @@ public:
     Widget* prev_sibling() const { return prev_sibling_; }
 
     void append_child(Widget* child);
+    // Reference overload so fluent chains read naturally:
+    //   row->append_child(new Button("Go")->on_click(fn).width(120));
+    void append_child(Widget& child) { append_child(&child); }
     void remove_from_parent();
     void clear_children();
+
+    // Lego-style builder: create a child, attach it, and return a reference so
+    // the chain keeps working. Replaces the ugly
+    //   append_child((new Button("Go"))->on_click(fn).width(120))
+    // with
+    //   row->add<Button>("Go").on_click(fn).width(120)
+    // Ownership is identical to append_child(new T(...)): the widget is heap
+    // allocated and this container holds a raw pointer (see ~Widget/clear_children).
+    // T must be a Widget subclass and fully defined at the call site.
+    template<typename T, typename... Args>
+    T& add(Args&&... args) {
+        static_assert(std::is_base_of<Widget, T>::value,
+                      "Widget::add<T> requires a Widget subclass");
+        T* child = new T(std::forward<Args>(args)...);
+        append_child(child);
+        return *child;
+    }
 
     Window* window() const;
     bool is_root() const { return parent_ == nullptr; }
@@ -51,57 +75,74 @@ public:
     f32 width() const { return bounds_.width(); }
     f32 height() const { return bounds_.height(); }
 
+    // Fluent short names (Lego-style). width()/height()/margin() with an argument
+    // are setters; with no argument they are getters.
+    Widget& width(f32 w) { return set_min_width(w); }
+    Widget& height(f32 h) { return set_min_height(h); }
+    Widget& margin(f32 all) { return set_margin(all); }
+    Widget& margin(const Margins& m) { return set_margin(m); }
+    Widget& grow(f32 grow) { return set_flex_grow(grow); }
+
     const Margins& margin() const { return margin_; }
-    void set_margin(const Margins& margin) {
+    Widget& set_margin(const Margins& margin) {
         margin_ = margin;
         invalidate();
+        return *this;
     }
-    void set_margin(f32 all) { set_margin(Margins{all, all, all, all}); }
+    Widget& set_margin(f32 all) { return set_margin(Margins{all, all, all, all}); }
 
     // bounds_ is relative to the parent; do NOT pass parent/global coordinates to
     // set_bounds — they would stack with parent-chain offsets. Custom containers
     // should subclass Layout and implement arrange_content(area).
-    void set_bounds(const RectF& rect);
-    void set_position(f32 x, f32 y);
-    void set_size(f32 w, f32 h);
+    Widget& set_bounds(const RectF& rect);
+    Widget& set_position(f32 x, f32 y);
+    Widget& set_size(f32 w, f32 h);
 
-    void set_min_width(f32 w) {
+    Widget& set_min_width(f32 w) {
         min_size_.width = w;
         invalidate();
+        return *this;
     }
-    void set_min_height(f32 h) {
+    Widget& set_min_height(f32 h) {
         min_size_.height = h;
         invalidate();
+        return *this;
     }
-    void set_max_width(f32 w) {
+    Widget& set_max_width(f32 w) {
         max_size_.width = w;
         invalidate();
+        return *this;
     }
-    void set_max_height(f32 h) {
+    Widget& set_max_height(f32 h) {
         max_size_.height = h;
         invalidate();
+        return *this;
     }
-    void set_min_size(const Size& s) {
+    Widget& set_min_size(const Size& s) {
         min_size_ = s;
         invalidate();
+        return *this;
     }
-    void set_max_size(const Size& s) {
+    Widget& set_max_size(const Size& s) {
         max_size_ = s;
         invalidate();
+        return *this;
     }
     const Size& min_size() const { return min_size_; }
     const Size& max_size() const { return max_size_; }
 
     // Flex grow/shrink factors (FlexBox containers only; default grow=0, shrink=1):
     // grow shares extra main-axis space, shrink contracts when space is short.
-    void set_flex_grow(f32 grow) {
+    Widget& set_flex_grow(f32 grow) {
         flex_grow_ = grow < 0.0f ? 0.0f : grow;
         invalidate();
+        return *this;
     }
     f32 flex_grow() const { return flex_grow_; }
-    void set_flex_shrink(f32 shrink) {
+    Widget& set_flex_shrink(f32 shrink) {
         flex_shrink_ = shrink < 0.0f ? 0.0f : shrink;
         invalidate();
+        return *this;
     }
     f32 flex_shrink() const { return flex_shrink_; }
 
@@ -111,31 +152,44 @@ public:
     bool enabled() const { return (flags_ & Flag_Enabled) != 0; }
     bool focusable() const { return (flags_ & Flag_Focusable) != 0; }
 
-    void set_visible(bool visible);
-    void set_enabled(bool enabled);
-    void set_focusable(bool focusable);
-    void set_cursor(Cursor cursor) { cursor_ = cursor; }
+    Widget& set_visible(bool visible);
+    Widget& set_enabled(bool enabled);
+    Widget& set_focusable(bool focusable);
+    Widget& set_cursor(Cursor cursor) {
+        cursor_ = cursor;
+        return *this;
+    }
     Cursor cursor() const { return cursor_; }
 
-    void set_draggable(bool draggable);
+    Widget& set_draggable(bool draggable);
     bool draggable() const { return has_flag(Flag_Draggable); }
 
     // ===== Visual transforms & opacity (animation foundation) =====
     // Pure-visual state over the layout position: translate, center rotate/scale,
     // opacity ([0,1]; 0 = fully transparent, skipped). No effect on layout/hit-test.
     // set_transition(ms) makes setters tween implicitly; animate_xxx() tweens explicitly.
-    void set_transition(f32 ms);
+    Widget& set_transition(f32 ms);
     f32 transition() const { return transition_ms_; }
 
-    void set_opacity(f32 opacity);
+    Widget& set_opacity(f32 opacity);
     f32 opacity() const { return opacity_.value(); }
-    void set_translate(f32 dx, f32 dy);
+    Widget& set_translate(f32 dx, f32 dy);
     Point translate() const { return Point{translate_x_.value(), translate_y_.value()}; }
-    void set_rotate_deg(f32 degrees);
+    Widget& set_rotate_deg(f32 degrees);
     f32 rotate_deg() const { return rotate_deg_.value(); }
-    void set_scale(f32 sx, f32 sy);
+    Widget& set_scale(f32 sx, f32 sy);
     f32 scale_x() const { return scale_x_.value(); }
     f32 scale_y() const { return scale_y_.value(); }
+
+    // Pointer-state queries.
+    //  - hovered(): Flag_Hovered is maintained centrally by the Window (update_hover
+    //    sets/clears it on enter/leave), so ANY widget — including custom subclasses
+    //    that never touch events — gets a working hovered().
+    //  - pressed(): passive read of Flag_Pressed. The flag is NOT maintained by the
+    //    base; interactive controls (Button, RadioButton, NavItem-style selectables)
+    //    set it in MouseDown and clear it in MouseUp themselves.
+    bool hovered() const { return has_flag(Flag_Hovered); }
+    bool pressed() const { return has_flag(Flag_Pressed); }
     // Affine transform from command space to window space for the current visual state
     Transform2D visual_transform() const;
     bool has_visual_state() const {
@@ -144,11 +198,11 @@ public:
                scale_x_.value() != 1.0f || scale_y_.value() != 1.0f;
     }
 
-    void set_tag(void* tag) { tag_ = tag; }
-    void* tag() const { return tag_; }
-
     Size measure(Size available, const PaintContext* ctx = nullptr);
     const Size& desired_size() const { return desired_size_; }
+#ifdef _DEBUG
+    f32 measure_ms() const { return measure_ms_; }
+#endif
 
 virtual void perform_layout(const PaintContext* ctx = nullptr);
     // Non-virtual wrapper tracking painted_bounds_ so invalidate covers visuals drawn
@@ -157,6 +211,10 @@ virtual void perform_layout(const PaintContext* ctx = nullptr);
     // paint(ctx) — that re-dispatches back here virtually, causing infinite recursion.
     void paint(PaintContext& ctx);
     virtual void paint_impl(PaintContext& ctx);
+    // Event handler: called synchronously during message drain (WndProc → dispatch).
+    // CONTRACT: handlers MUST return in <1 ms. Long-running work (I/O, network, decode)
+    // must be deferred to the frame boundary; the framework provides no yield point
+    // inside the drain loop. Violating this stalls all windows and animations.
     virtual void on_event(Event& e);
     virtual Widget* hit_test(f32 x, f32 y);
     virtual bool is_window() const { return false; }
@@ -166,6 +224,12 @@ virtual void perform_layout(const PaintContext* ctx = nullptr);
 
     // Window-space extent actually painted this frame; empty = never painted
     const RectF& painted_bounds() const { return painted_bounds_; }
+
+    // Reset painted_bounds_ to current layout bounds. Call after a permanent shrink
+    // (e.g. collapse animation complete) so the culling rect doesn't stay enlarged
+    // at the historical maximum. The union semantics in paint() will re-expand on
+    // the next frame if needed.
+    void reset_painted_bounds();
 
     // Self-only (excl. subtree) painted extent, for invalidating own visual state
     const RectF& self_painted_bounds() const { return self_painted_bounds_; }
@@ -183,6 +247,12 @@ virtual void perform_layout(const PaintContext* ctx = nullptr);
     // Caret rectangle in WINDOW coordinates; anchors the system composition/candidate
     // windows. Empty rect = no anchor (IME UI falls back to the window corner).
     virtual RectF ime_caret_rect() const { return RectF{}; }
+
+    // ===== Floating widgets =====
+    // Self-positioning overlays (context menus, popups) must opt out of parent
+    // layouts: two writers on bounds_ (panel arrange + own anchor) fight every frame
+    // and cause perpetual invalidation.
+    virtual bool participates_in_layout() const { return true; }
 
 protected:
     // Invalidates old visual extent plus the new transformed footprint (animation use)
@@ -211,7 +281,6 @@ protected:
     Margins margin_;
     u32 flags_ = Flag_Visible | Flag_Enabled;
     Cursor cursor_ = Cursor::Arrow;
-    void* tag_ = nullptr;
     // Window-space extent drawn this frame (auto-tracked by the paint wrapper)
     RectF painted_bounds_{0, 0, 0, 0};
     // Self-only painted extent; only it is invalidated for own-state changes
@@ -224,6 +293,9 @@ protected:
     f32 flex_grow_ = 0.0f;
     f32 flex_shrink_ = 1.0f;
     u64 last_measure_pass_ = ~0ull;
+#ifdef _DEBUG
+    f32 measure_ms_ = 0.0f;  // cumulative measure_impl time (debug builds only)
+#endif
     // AnimatableProperty<f32>: tweening with safe destruction (alive guard);
     // on_changed invalidates on any change
     f32 transition_ms_ = 0.0f;

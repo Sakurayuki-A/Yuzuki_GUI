@@ -65,10 +65,16 @@ struct ImeData {
     u32 cursor = 0;  // caret offset inside a composition string
 };
 
+struct SizeData {
+    f32 width = 0.0f;   // new client size in DIPs
+    f32 height = 0.0f;
+};
+
 union EventData {
     MouseData mouse;
     KeyData key;
     ImeData ime;
+    SizeData size;
 };
 
 struct Event {

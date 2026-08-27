@@ -113,11 +113,6 @@ void Window::close() {
     PostMessageW(static_cast<HWND>(hwnd_), WM_CLOSE, 0, 0);
 }
 
-void Window::set_title(const String& title) {
-    title_ = title;
-    if (hwnd_) SetWindowTextW(static_cast<HWND>(hwnd_), utf::to_wide(title_).c_str());
-}
-
 void Window::set_root(Widget* widget) {
     context_menu_ = nullptr;
     if (root_ && root_ != widget) {

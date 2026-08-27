@@ -25,18 +25,25 @@ public:
     explicit TextBox(String text = String(), TextBoxConfig config = TextBoxConfig{});
 
     String text() const { return utf::to_utf8(text_); }
-    void set_text(const String& text);
+    TextBox& set_text(const String& text);
+    TextBox& text(const String& text) { return set_text(text); }
 
-    void set_placeholder(const String& placeholder) { placeholder_ = placeholder; }
+    TextBox& set_placeholder(const String& placeholder) {
+        placeholder_ = placeholder;
+        return *this;
+    }
     const String& placeholder() const { return placeholder_; }
 
     const TextBoxConfig& config() const { return config_; }
-    void set_config(const TextBoxConfig& config);
+    TextBox& set_config(const TextBoxConfig& config);
 
     bool read_only() const { return config_.read_only; }
-    void set_read_only(bool read_only);
+    TextBox& set_read_only(bool read_only);
 
-    void set_content_inset(f32 inset) { content_inset_ = inset; }
+    TextBox& set_content_inset(f32 inset) {
+        content_inset_ = inset;
+        return *this;
+    }
     f32 content_inset() const { return content_inset_; }
 
     Size measure_impl(Size available, const PaintContext* ctx) override;
@@ -66,6 +73,9 @@ private:
     u32 line_index_at(u32 pos) const;
     u32 line_start(u32 line) const;
     u32 line_end(u32 line) const;
+    // Line height derived from the loaded font's metrics (baseline anchor); a fixed
+    // pixel value is only a last-resort fallback before any rendering context exists.
+    f32 font_line_height(const PaintContext* ctx) const;
     f32 line_height() const;
 
     WString text_;

@@ -12,17 +12,19 @@ RadioButton::RadioButton(String text) : text_(std::move(text)) {
     set_cursor(Cursor::Hand);
 }
 
-void RadioButton::set_text(const String& text) {
-    if (text_ == text) return;
+RadioButton& RadioButton::set_text(const String& text) {
+    if (text_ == text) return *this;
     text_ = text;
     invalidate();
+    return *this;
 }
 
-void RadioButton::set_checked(bool checked) {
-    if (checked_ == checked) return;
+RadioButton& RadioButton::set_checked(bool checked) {
+    if (checked_ == checked) return *this;
     if (checked) check_siblings();
     checked_ = checked;
     invalidate();
+    return *this;
 }
 
 Size RadioButton::measure_impl(Size available, const PaintContext* ctx) {

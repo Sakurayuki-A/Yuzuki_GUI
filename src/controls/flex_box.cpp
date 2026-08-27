@@ -1,4 +1,4 @@
-#include <yuzuki/controls/flex_box.hpp>
+﻿#include <yuzuki/controls/flex_box.hpp>
 
 #include <algorithm>
 #include <vector>
@@ -7,28 +7,32 @@ namespace yzk {
 
 FlexBox::FlexBox(Orientation direction) : direction_(direction) {}
 
-void FlexBox::set_direction(Orientation direction) {
-    if (direction_ == direction) return;
+FlexBox& FlexBox::set_direction(Orientation direction) {
+    if (direction_ == direction) return *this;
     direction_ = direction;
     invalidate();
+    return *this;
 }
 
-void FlexBox::set_spacing(f32 spacing) {
-    if (spacing_ == spacing) return;
+FlexBox& FlexBox::set_spacing(f32 spacing) {
+    if (spacing_ == spacing) return *this;
     spacing_ = spacing;
     invalidate();
+    return *this;
 }
 
-void FlexBox::set_align_main(FlexAlign align) {
-    if (main_align_ == align) return;
+FlexBox& FlexBox::set_align_main(FlexAlign align) {
+    if (main_align_ == align) return *this;
     main_align_ = align;
     invalidate();
+    return *this;
 }
 
-void FlexBox::set_align_cross(FlexCrossAlign align) {
-    if (cross_align_ == align) return;
+FlexBox& FlexBox::set_align_cross(FlexCrossAlign align) {
+    if (cross_align_ == align) return *this;
     cross_align_ = align;
     invalidate();
+    return *this;
 }
 
 namespace {
@@ -50,7 +54,7 @@ Size FlexBox::measure_content(Size available, const PaintContext* ctx) {
     i32 count = 0;
 
     for (Widget* child = first_child_; child; child = child->next_sibling()) {
-        if (!child->visible()) continue;
+        if (!child->visible() || !child->participates_in_layout()) continue;
         const Margins m = child->margin();
         const f32 cw = available.width > m.horizontal() ? available.width - m.horizontal() : 0.0f;
         const f32 ch = available.height > m.vertical() ? available.height - m.vertical() : 0.0f;
@@ -76,7 +80,7 @@ void FlexBox::arrange_content(const RectF& area, const PaintContext* ctx) {
     f32 shrink_sum = 0.0f;
 
     for (Widget* child = first_child_; child; child = child->next_sibling()) {
-        if (!child->visible()) continue;
+        if (!child->visible() || !child->participates_in_layout()) continue;
         const Margins m = child->margin();
         const Size s = child->desired_size();
         if (s.width <= 0.0f && s.height <= 0.0f) continue;
@@ -158,6 +162,12 @@ void FlexBox::arrange_content(const RectF& area, const PaintContext* ctx) {
     const f32 main_start = horiz ? area.left : area.top;
     const f32 cross_start = horiz ? area.top : area.left;
     f32 cursor = main_start + start_lead;
+
+    // Floating children (menus/popups): recurse for their own layout pass, but keep
+    // them out of item collection/placement entirely.
+    for (Widget* child = first_child_; child; child = child->next_sibling()) {
+        if (child->visible() && !child->participates_in_layout()) child->perform_layout(ctx);
+    }
 
     for (FlexItem& it : items) {
         const f32 main_pos = cursor + (horiz ? it.m.left : it.m.top);

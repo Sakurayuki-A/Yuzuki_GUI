@@ -80,11 +80,17 @@ void ContextMenu::paint_impl(PaintContext& ctx) {
 }
 
 void ContextMenu::on_event(Event& e) {
+    // Mouse events arrive in WINDOW coordinates; index_at expects widget-local ones.
+    // Convert through global_bounds(): subtracting parent-local bounds_.left directly
+    // breaks whenever an ancestor carries an offset (nested panels / scroll).
+    const auto to_local_coords = [this](const Event& ev) {
+        const RectF g = global_bounds();
+        return Point{ev.data.mouse.x - g.left, ev.data.mouse.y - g.top};
+    };
     if (e.type == EventType::MouseMove) {
         e.consumed = true;
-        const f32 lx = e.data.mouse.x - bounds_.left;
-        const f32 ly = e.data.mouse.y - bounds_.top;
-        const i32 idx = index_at(lx, ly);
+        const Point p = to_local_coords(e);
+        const i32 idx = index_at(p.x, p.y);
         if (idx != hover_) {
             hover_ = idx;
             invalidate();
@@ -93,9 +99,8 @@ void ContextMenu::on_event(Event& e) {
     }
     if (e.type == EventType::MouseDown && (e.data.mouse.buttons & MouseButton_Left) != 0) {
         e.consumed = true;
-        const f32 lx = e.data.mouse.x - bounds_.left;
-        const f32 ly = e.data.mouse.y - bounds_.top;
-        const i32 idx = index_at(lx, ly);
+        const Point p = to_local_coords(e);
+        const i32 idx = index_at(p.x, p.y);
         if (idx >= 0 && items_[static_cast<size_t>(idx)].enabled) {
             auto action = items_[static_cast<size_t>(idx)].action;
             close();

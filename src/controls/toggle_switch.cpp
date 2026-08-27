@@ -13,10 +13,11 @@ ToggleSwitch::ToggleSwitch() {
     set_focusable(true);
 }
 
-void ToggleSwitch::set_checked(bool checked) {
-    if (checked_ == checked) return;
+ToggleSwitch& ToggleSwitch::set_checked(bool checked) {
+    if (checked_ == checked) return *this;
     checked_ = checked;
     invalidate();
+    return *this;
 }
 
 Size ToggleSwitch::measure_impl(Size available, const PaintContext* ctx) {

@@ -31,7 +31,6 @@ public:
     void destroy();
     void show();
     void close();
-    void set_title(const String& title);
 
     bool is_window() const override { return true; }
 
@@ -74,6 +73,7 @@ public:
         u64 pump_calls = 0; // pump() calls (incl. skipped by frame-interval guard)
         u64 rendered_rects = 0; // damage rects rendered, cumulative
         u64 full_frames = 0;    // full-repaint frames, cumulative
+        u64 full_damage_clamp = 0; // frames where damage_full_ was set by the 32-rect cap
     };
     const FrameStats& frame_stats() const { return frame_stats_; }
 
@@ -105,6 +105,10 @@ private:
     void tick_animations();
     void refresh_animation_driver();
     void on_resize(u32 width_px, u32 height_px);
+    // Coalesced Resize broadcast: on_resize only records the pending size; pump
+    // delivers ONE Resize event per rendered frame (whole tree, parents first, before
+    // layout). Same-size WM_SIZE messages are dropped entirely.
+    void broadcast_resize_if_pending();
     void on_mouse_input(u32 message, f32 x_px, f32 y_px, u8 buttons, u8 mods);
     void on_wheel(f32 x_dip, f32 y_dip, i16 delta, u8 mods);
     void on_key(u32 message, u32 vk, u16 chr, u8 mods, bool repeat);
@@ -187,6 +191,12 @@ private:
     void* ime_prev_context_ = nullptr;  // HIMC saved while IME is disabled
     bool ime_disabled_ = false;
     WString ime_text_buffer_;           // payload storage; valid during event dispatch
+
+    // ===== Coalesced resize broadcast =====
+    u32 last_resize_px_w_ = 0;
+    u32 last_resize_px_h_ = 0;
+    bool resize_seen_ = false;
+    bool resize_broadcast_pending_ = false;
 };
 
 using WindowList = std::vector<Window*>;

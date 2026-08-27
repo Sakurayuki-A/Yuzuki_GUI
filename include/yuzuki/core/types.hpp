@@ -197,6 +197,8 @@ struct GradientStop {
     Color color{};
 };
 
+// Cross/SizeAll have no in-repo consumer yet; they exist for apps that set
+// set_cursor() on custom interaction zones.
 enum class Cursor : u8 { Arrow, Hand, IBeam, Cross, SizeAll };
 
 }  // namespace yzk

@@ -12,9 +12,6 @@ PaintContext::PaintContext(RenderBackend& backend, const Theme& theme)
 
     spec.size = theme.font_size_small;
     font_small_ = backend.create_font(spec);
-
-    spec.size = theme.font_size_title;
-    font_title_ = backend.create_font(spec);
 }
 
 PaintContext::~PaintContext() {
@@ -394,22 +391,6 @@ void PaintContext::draw_text_small(const String& text, const RectF& rect, const 
     cmd.type = PaintCommand::Type::DrawText;
     cmd.rect = w;
     cmd.font = font_small_;
-    cmd.color_a = color;
-    cmd.align_h = align_h;
-    cmd.align_v = align_v;
-    cmd.text = text;
-    push_command(std::move(cmd));
-}
-
-void PaintContext::draw_text_title(const String& text, const RectF& rect, const Color& color,
-                                   TextAlignH align_h, TextAlignV align_v) const {
-    if (color.is_transparent()) return;
-    const RectF w = rect.translated(offset_x_, offset_y_);
-    track(w);
-    PaintCommand cmd;
-    cmd.type = PaintCommand::Type::DrawText;
-    cmd.rect = w;
-    cmd.font = font_title_;
     cmd.color_a = color;
     cmd.align_h = align_h;
     cmd.align_v = align_v;

@@ -75,10 +75,6 @@ public:
     bool done() const { return done_; }
     bool running() const { return !done_ && elapsed_ < duration_; }
 
-    void set_duration(f32 duration_ms) { duration_ = duration_ms; }
-    void set_easing(Easing easing) { easing_ = easing; }
-    void set_on_update(UpdateCallback cb) { on_update_ = std::move(cb); }
-
     // Jump straight to the end value
     void finish() {
         elapsed_ = duration_;

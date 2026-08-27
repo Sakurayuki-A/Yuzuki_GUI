@@ -284,6 +284,31 @@ Widget* make_controls_page(Window& window) {
         row->append_child(list);
     }
 
+    // GridPanel track sizing: resize the window and compare the three columns —
+    // Fixed keeps its exact width, Auto hugs its content, Star absorbs the rest.
+    section_hint(body, "GridPanel tracks: col0 Fixed(120) / col1 Auto / col2 Star(1.5)");
+    {
+        auto grid = new GridPanel(3, 1);
+        grid->set_gap(10.0f);
+        grid->set_column_fixed(0, 120.0f);
+        grid->set_column_star(2, 1.5f);
+
+        const Theme& th = Theme::get();
+        const auto make_cell = [&](const char* text, const Color& bg) {
+            auto* cell = new Box(bg);
+            cell->set_radius(6.0f);
+            auto* label = new Label(text);
+            label->set_small(true);
+            cell->append_child(label);
+            return cell;
+        };
+        grid->add(make_cell("Fixed 120", th.accent), 0, 0);
+        grid->add(make_cell("Auto", th.surface_container_high), 1, 0);
+        grid->add(make_cell("Star 1.5", th.accent.with_alpha(70)), 2, 0);
+
+        body->append_child(grid);
+    }
+
     return root;
 }
 

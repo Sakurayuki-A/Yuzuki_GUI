@@ -2,22 +2,25 @@
 
 namespace yzk {
 
-void BackdropBlur::set_blur(f32 blur) {
-    if (blur_ == blur) return;
+BackdropBlur& BackdropBlur::set_blur(f32 blur) {
+    if (blur_ == blur) return *this;
     blur_ = blur;
     invalidate();
+    return *this;
 }
 
-void BackdropBlur::set_tint(const Color& tint) {
-    if (tint_ == tint) return;
+BackdropBlur& BackdropBlur::set_tint(const Color& tint) {
+    if (tint_ == tint) return *this;
     tint_ = tint;
     invalidate();
+    return *this;
 }
 
-void BackdropBlur::set_corner_radius(f32 radius) {
-    if (corner_radius_ == radius) return;
+BackdropBlur& BackdropBlur::set_corner_radius(f32 radius) {
+    if (corner_radius_ == radius) return *this;
     corner_radius_ = radius;
     invalidate();
+    return *this;
 }
 
 Size BackdropBlur::measure_impl(Size available, const PaintContext* ctx) {

@@ -1,4 +1,5 @@
 #include <yuzuki/ui/theme.hpp>
+#include <yuzuki/ui/application.hpp>
 
 namespace yzk {
 
@@ -10,8 +11,29 @@ const Theme& Theme::get() {
     return g_theme;
 }
 
+const Color& theme_color(const Theme& theme, ThemeRole role) {
+    switch (role) {
+        case ThemeRole::Background: return theme.background;
+        case ThemeRole::Surface: return theme.surface;
+        case ThemeRole::SurfaceContainerLow: return theme.surface_container_low;
+        case ThemeRole::SurfaceContainer: return theme.surface_container;
+        case ThemeRole::SurfaceContainerHigh: return theme.surface_container_high;
+        case ThemeRole::Border: return theme.border;
+        case ThemeRole::Track: return theme.track;
+        case ThemeRole::Accent: return theme.accent;
+        case ThemeRole::AccentText: return theme.accent_text;
+        case ThemeRole::Text: return theme.text;
+        case ThemeRole::TextSecondary: return theme.text_secondary;
+        case ThemeRole::TextDisabled: return theme.text_disabled;
+    }
+    return theme.background;
+}
+
 void Theme::set(Theme theme) {
     g_theme = theme;
+    // Restyle immediately: without this the new palette only reaches pixels after
+    // some unrelated invalidation, so a switch looked half-applied.
+    Application::invalidate_all_windows();
 }
 
 Theme Theme::make_dark() {

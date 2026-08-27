@@ -1,4 +1,4 @@
-#include <yuzuki/controls/dock_panel.hpp>
+﻿#include <yuzuki/controls/dock_panel.hpp>
 
 namespace yzk {
 
@@ -18,10 +18,11 @@ void DockPanel::dock(Widget* child, Dock dock) {
     docks_.push_back(dock);
 }
 
-void DockPanel::set_gap(f32 gap) {
-    if (gap_ == gap) return;
+DockPanel& DockPanel::set_gap(f32 gap) {
+    if (gap_ == gap) return *this;
     gap_ = gap;
     invalidate();
+    return *this;
 }
 
 Size DockPanel::measure_content(Size available, const PaintContext* ctx) {
@@ -34,7 +35,7 @@ Size DockPanel::measure_content(Size available, const PaintContext* ctx) {
     size_t i = 0;
     while (child) {
         const Dock dock = i < docks_.size() ? docks_[i] : Dock::Fill;
-        if (child->visible()) {
+        if (child->visible() && child->participates_in_layout()) {
             const Margins m = child->margin();
             const f32 cw = rem_w > m.horizontal() ? rem_w - m.horizontal() : 0.0f;
             const f32 ch = rem_h > m.vertical() ? rem_h - m.vertical() : 0.0f;
@@ -69,7 +70,10 @@ void DockPanel::arrange_content(const RectF& area, const PaintContext* ctx) {
     size_t i = 0;
     while (child) {
         const Dock dock = i < docks_.size() ? docks_[i] : Dock::Fill;
-        if (child->visible()) {
+        if (child->visible() && !child->participates_in_layout()) {
+            // Floating children: recurse for their own layout pass only.
+            child->perform_layout(ctx);
+        } else if (child->visible() && child->participates_in_layout()) {
             const Margins m = child->margin();
             const Size s = child->desired_size();
             const f32 slot_w = s.width + m.horizontal();

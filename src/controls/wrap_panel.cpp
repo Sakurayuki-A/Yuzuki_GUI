@@ -1,17 +1,19 @@
-#include <yuzuki/controls/wrap_panel.hpp>
+﻿#include <yuzuki/controls/wrap_panel.hpp>
 
 namespace yzk {
 
-void WrapPanel::set_spacing(f32 spacing) {
-    if (spacing_ == spacing) return;
+WrapPanel& WrapPanel::set_spacing(f32 spacing) {
+    if (spacing_ == spacing) return *this;
     spacing_ = spacing;
     invalidate();
+    return *this;
 }
 
-void WrapPanel::set_line_spacing(f32 line_spacing) {
-    if (line_spacing_ == line_spacing) return;
+WrapPanel& WrapPanel::set_line_spacing(f32 line_spacing) {
+    if (line_spacing_ == line_spacing) return *this;
     line_spacing_ = line_spacing;
     invalidate();
+    return *this;
 }
 
 Size WrapPanel::measure_content(Size available, const PaintContext* ctx) {
@@ -26,7 +28,7 @@ Size WrapPanel::measure_content(Size available, const PaintContext* ctx) {
     const bool bounded = available.width > 0.0f;
 
     for (Widget* child = first_child_; child; child = child->next_sibling()) {
-        if (!child->visible()) continue;
+        if (!child->visible() || !child->participates_in_layout()) continue;
         const Margins m = child->margin();
         const f32 cw = available.width > m.horizontal() ? available.width - m.horizontal() : 0.0f;
         const f32 ch = available.height > m.vertical() ? available.height - m.vertical() : 0.0f;
@@ -69,6 +71,11 @@ void WrapPanel::arrange_content(const RectF& area, const PaintContext* ctx) {
     size_t i = 0;
     for (Widget* child = first_child_; child; child = child->next_sibling()) {
         if (!child->visible()) continue;
+        // Floating children: recurse for their own layout, keep out of the flow.
+        if (!child->participates_in_layout()) {
+            child->perform_layout(ctx);
+            continue;
+        }
         if (i >= child_size_.size()) break;
         const Margins m = child->margin();
         const Size s = child_size_[i];

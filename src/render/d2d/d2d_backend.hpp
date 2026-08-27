@@ -25,8 +25,6 @@ public:
     D2DBackend() = default;
     ~D2DBackend() override;
 
-    BackendInfo info() const override;
-
     bool create_target(void* native_window, u32 width_px, u32 height_px, u32 dpi) override;
     void destroy_target() override;
     bool resize(u32 width_px, u32 height_px) override;
@@ -34,7 +32,7 @@ public:
     u32 dpi() const override { return dpi_; }
     f32 dpi_scale() const override { return dpi_ / 96.0f; }
 
-    bool begin_frame(const Color& clear, const RectF* clip_dip) override;
+    bool begin_frame(const Color& clear) override;
     bool end_frame() override;
     f64 composite_ms_avg() const override {
         return composite_count_ ? composite_ms_total_ / static_cast<f64>(composite_count_) : -1.0;

@@ -66,32 +66,36 @@ TextBox::TextBox(String text, TextBoxConfig config) : config_(config) {
     set_cursor(Cursor::IBeam);
 }
 
-void TextBox::set_config(const TextBoxConfig& config) {
+TextBox& TextBox::set_config(const TextBoxConfig& config) {
     config_ = config;
     invalidate();
+    return *this;
 }
 
-void TextBox::set_read_only(bool read_only) {
-    if (config_.read_only == read_only) return;
+TextBox& TextBox::set_read_only(bool read_only) {
+    if (config_.read_only == read_only) return *this;
     config_.read_only = read_only;
     invalidate();
+    return *this;
 }
 
-void TextBox::set_text(const String& text) {
+TextBox& TextBox::set_text(const String& text) {
     text_ = utf::to_wide(text);
     if (cursor_ > text_.size()) cursor_ = static_cast<u32>(text_.size());
     if (sel_start_ > text_.size()) sel_start_ = static_cast<u32>(text_.size());
     invalidate();
+    return *this;
 }
 
 Size TextBox::measure_impl(Size available, const PaintContext* ctx) {
     if (config_.mode == TextBoxMode::MultiLine) {
-        f32 height = kLineHeight;
+        // Line metrics derive from the loaded font, never a hardcoded pixel value.
+        const f32 line_h = font_line_height(ctx);
+        f32 height = line_h;
         if (ctx && !text_.empty()) {
             const Size m = ctx->measure_text(utf::to_utf8(text_), false, available.width);
-            height = m.height > kLineHeight ? m.height : kLineHeight;
+            height = m.height > line_h ? m.height : line_h;
         }
-        const f32 line_h = kLineHeight;
         u32 lines = static_cast<u32>(height / line_h + 0.5f);
         if (lines < config_.min_lines) lines = config_.min_lines;
         if (lines > config_.max_lines) lines = config_.max_lines;
@@ -112,8 +116,23 @@ WString TextBox::display_text() const {
     return masked;
 }
 
-f32 TextBox::line_height() const {
+f32 TextBox::font_line_height(const PaintContext* ctx) const {
+    // Typography anchor from real font metrics: one sample line measured through the
+    // loaded font (layout cache makes this cheap). kLineHeight is only a last-resort
+    // fallback when no rendering context exists yet.
+    if (ctx) {
+        const f32 h = ctx->measure_text("Wg").height;
+        if (h > 1.0f) return h;
+    }
+    if (Window* win = window()) {
+        const f32 h = win->backend().measure_text(text_box_font(win), "Wg", 1e7f).height;
+        if (h > 1.0f) return h;
+    }
     return kLineHeight;
+}
+
+f32 TextBox::line_height() const {
+    return font_line_height(nullptr);
 }
 
 u32 TextBox::line_index_at(u32 pos) const {
@@ -250,7 +269,10 @@ void TextBox::paint_impl(PaintContext& ctx) {
             caret_y = b.top + (b.height() - line_height()) / 2.0f;
         }
         const f32 caret_xr = static_cast<f32>(static_cast<i32>(caret_x + 0.5f));
-        ctx.fill_rect(RectF::make(caret_xr, caret_y + 3.0f, 2.0f, line_height() - 6.0f), theme.accent);
+        // Caret bar geometry scales with the font-derived line height.
+        const f32 lh = line_height();
+        const f32 pad = lh * 0.18f;
+        ctx.fill_rect(RectF::make(caret_xr, caret_y + pad, 2.0f, lh - pad * 2.0f), theme.accent);
     }
     ctx.pop_clip();
 }

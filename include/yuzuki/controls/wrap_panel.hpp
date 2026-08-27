@@ -10,10 +10,11 @@ public:
     WrapPanel() = default;
 
     f32 spacing() const { return spacing_; }
-    void set_spacing(f32 spacing);
+    WrapPanel& set_spacing(f32 spacing);
+    WrapPanel& spacing(f32 spacing) { return set_spacing(spacing); }
 
     f32 line_spacing() const { return line_spacing_; }
-    void set_line_spacing(f32 line_spacing);
+    WrapPanel& set_line_spacing(f32 line_spacing);
 
     Size measure_content(Size available, const PaintContext* ctx) override;
     void arrange_content(const RectF& area, const PaintContext* ctx) override;

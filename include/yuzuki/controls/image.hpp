@@ -20,20 +20,22 @@ public:
     Image() = default;
 
     bool load_from_file(Window& win, const String& path);
-    void set_bitmap(BitmapId id);
+    Image& set_bitmap(BitmapId id);
     BitmapId bitmap() const { return bitmap_; }
 
-    void set_scale_mode(ImageScaleMode mode) {
-        if (mode_ == mode) return;
+    Image& set_scale_mode(ImageScaleMode mode) {
+        if (mode_ == mode) return *this;
         mode_ = mode;
         invalidate();
+        return *this;
     }
     ImageScaleMode scale_mode() const { return mode_; }
 
-    void set_corner_radius(f32 radius) {
-        if (radius_ == radius) return;
+    Image& set_corner_radius(f32 radius) {
+        if (radius_ == radius) return *this;
         radius_ = radius;
         invalidate();
+        return *this;
     }
     f32 corner_radius() const { return radius_; }
 

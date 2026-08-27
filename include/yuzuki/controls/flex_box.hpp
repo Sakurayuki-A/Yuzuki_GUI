@@ -24,16 +24,17 @@ public:
     explicit FlexBox(Orientation direction = Orientation::Horizontal);
 
     Orientation direction() const { return direction_; }
-    void set_direction(Orientation direction);
+    FlexBox& set_direction(Orientation direction);
 
     f32 spacing() const { return spacing_; }
-    void set_spacing(f32 spacing);
+    FlexBox& set_spacing(f32 spacing);
+    FlexBox& spacing(f32 spacing) { return set_spacing(spacing); }
 
     FlexAlign main_align() const { return main_align_; }
-    void set_align_main(FlexAlign align);
+    FlexBox& set_align_main(FlexAlign align);
 
     FlexCrossAlign cross_align() const { return cross_align_; }
-    void set_align_cross(FlexCrossAlign align);
+    FlexBox& set_align_cross(FlexCrossAlign align);
 
     Size measure_content(Size available, const PaintContext* ctx) override;
     void arrange_content(const RectF& area, const PaintContext* ctx) override;

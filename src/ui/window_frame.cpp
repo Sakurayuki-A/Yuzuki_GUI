@@ -54,6 +54,7 @@ void Window::invalidate_area(const RectF& rect) {
     if (damage_rects_.size() >= kMaxDamageRects) {
         damage_full_ = true;
         damage_rects_.clear();
+        ++frame_stats_.full_damage_clamp;
         return;
     }
     damage_rects_.push_back(r);
@@ -139,6 +140,10 @@ bool Window::pump() {
     // their invalidations set needs_paint_ and drive the next frame (continuous animation)
     AnimationSystem::instance().tick_frames(now_ms);
 
+    // Coalesced Resize delivery: once per rendered frame, before layout, so widgets
+    // can adjust state that the same frame's layout pass then consumes.
+    broadcast_resize_if_pending();
+
     const bool full = damage_full_;
     std::vector<RectF> damage;
     if (full) {
@@ -174,7 +179,7 @@ bool Window::pump() {
     };
 
     for (int attempt = 0; attempt < 3; ++attempt) {
-        const bool ok = full ? backend_->begin_frame(Theme::get().background, nullptr)
+        const bool ok = full ? backend_->begin_frame(Theme::get().background)
                              : backend_->begin_partial_frame(Theme::get().background);
         if (!ok) {
             restore();
@@ -241,12 +246,45 @@ bool Window::pump() {
 }
 
 void Window::on_resize(u32 width_px, u32 height_px) {
+    // Same-size WM_SIZE messages (frame tweaks, ShowWindow) are no-ops: skipping the
+    // backend resize, the full invalidate AND the broadcast keeps them free.
+    if (resize_seen_ && last_resize_px_w_ == width_px && last_resize_px_h_ == height_px) return;
+    resize_seen_ = true;
+    last_resize_px_w_ = width_px;
+    last_resize_px_h_ = height_px;
+
     const f32 scale = backend_ ? backend_->dpi_scale() : 1.0f;
     client_width_ = static_cast<u32>(static_cast<f32>(width_px) / scale + 0.5f);
     client_height_ = static_cast<u32>(static_cast<f32>(height_px) / scale + 0.5f);
     bounds_ = RectF::make(0.0f, 0.0f, static_cast<f32>(client_width_), static_cast<f32>(client_height_));
     if (backend_) backend_->resize(width_px, height_px);
     invalidate_all();
+    // Broadcast is coalesced into the next pump: dragging the window edges fires many
+    // WM_SIZE messages per rendered frame, and an immediate tree walk per message would
+    // multiply the O(n) cost by the message rate.
+    resize_broadcast_pending_ = true;
+}
+
+void Window::broadcast_resize_if_pending() {
+    if (!resize_broadcast_pending_ || !root_) {
+        resize_broadcast_pending_ = false;
+        return;
+    }
+    resize_broadcast_pending_ = false;
+    // Whole-tree broadcast (parents first, matching layout order): dispatch() only
+    // walks ancestors, which would leave children blind to container size changes.
+    const auto broadcast = [](auto&& self, Widget* w, Event& e) -> void {
+        if (!w || !w->visible()) return;
+        w->on_event(e);
+        for (Widget* child = w->first_child(); child; child = child->next_sibling()) {
+            self(self, child, e);
+        }
+    };
+    Event resize;
+    resize.type = EventType::Resize;
+    resize.data.size = SizeData{static_cast<f32>(client_width_),
+                                static_cast<f32>(client_height_)};
+    broadcast(broadcast, root_, resize);
 }
 
 }  // namespace yzk

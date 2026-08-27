@@ -35,6 +35,8 @@ public:
     void on_event(Event& e) override;
     void perform_layout(const PaintContext* ctx = nullptr) override;
     Widget* hit_test(f32 x, f32 y) override;
+    // Anchors itself at the open point; parent layouts must not arrange it.
+    bool participates_in_layout() const override { return false; }
 
 private:
     i32 index_at(f32 x, f32 y) const;

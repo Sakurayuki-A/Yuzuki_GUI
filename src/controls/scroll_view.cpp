@@ -9,34 +9,39 @@ constexpr f32 kThumbMinHeight = 24.0f;
 constexpr f32 kWheelStep = 40.0f;
 }  // namespace
 
-void ScrollView::set_content(Widget* content) {
-    if (content_ == content) return;
+ScrollView& ScrollView::set_content(Widget* content) {
+    if (content_ == content) return *this;
     if (content_ && content_) content_->remove_from_parent();
     content_ = content;
     if (content_) append_child(content_);
     invalidate();
+    return *this;
 }
 
-void ScrollView::set_scroll_y(f32 y) {
+ScrollView& ScrollView::set_scroll_y(f32 y) {
     scroll_y_ = y;
     clamp_scroll();
     invalidate();
+    return *this;
 }
 
-void ScrollView::scroll_by(f32 dy) {
+ScrollView& ScrollView::scroll_by(f32 dy) {
     set_scroll_y(scroll_y_ + dy);
+    return *this;
 }
 
-void ScrollView::set_suggested_height(f32 height) {
-    if (suggested_height_ == height) return;
+ScrollView& ScrollView::set_suggested_height(f32 height) {
+    if (suggested_height_ == height) return *this;
     suggested_height_ = height;
     invalidate();
+    return *this;
 }
 
 Size ScrollView::measure_impl(Size available, const PaintContext* ctx) {
     (void)ctx;
     const f32 w = available.width > 0.0f ? available.width : 0.0f;
-    return Size{w, suggested_height_};
+    const f32 h = suggested_height_ > 0.0f ? suggested_height_ : available.height;
+    return Size{w, h};
 }
 
 void ScrollView::perform_layout(const PaintContext* ctx) {

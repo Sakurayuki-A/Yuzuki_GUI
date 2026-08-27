@@ -48,12 +48,6 @@ struct Paint {
     bool stroked() const { return !stroke.is_transparent() && stroke_width > 0.0f; }
 };
 
-struct BackendInfo {
-    String name;
-    u32 version_major = 0;
-    u32 version_minor = 0;
-};
-
 struct TextSelectionRect {
     RectF rect;
     i32 begin = 0;
@@ -64,8 +58,6 @@ class RenderBackend {
 public:
     virtual ~RenderBackend() = default;
 
-    virtual BackendInfo info() const = 0;
-
     virtual bool create_target(void* native_window, u32 width_px, u32 height_px, u32 dpi) = 0;
     virtual void destroy_target() = 0;
     virtual bool resize(u32 width_px, u32 height_px) = 0;
@@ -73,7 +65,7 @@ public:
     virtual u32 dpi() const = 0;
     virtual f32 dpi_scale() const { return static_cast<f32>(dpi()) / 96.0f; }
 
-    virtual bool begin_frame(const Color& clear, const RectF* clip_dip) = 0;
+    virtual bool begin_frame(const Color& clear) = 0;
     virtual bool end_frame() = 0;
     // True if deferred resources (e.g. shadow maps) became ready this frame and need one more repaint to show.
     virtual bool shadows_pending_after_frame() const { return false; }

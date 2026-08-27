@@ -9,15 +9,18 @@ class Icon : public Widget {
 public:
     Icon(IconId id, f32 size = 16.0f);
 
-    void set_icon(IconId id);
+    Icon& set_icon(IconId id);
     IconId icon() const { return id_; }
+    Icon& icon(IconId id) { return set_icon(id); }
 
-    void set_icon_size(f32 size);
+    Icon& set_icon_size(f32 size);
     f32 icon_size() const { return size_; }
+    Icon& icon_size(f32 size) { return set_icon_size(size); }
 
     // Transparent (default) = follow the theme text color
-    void set_color(const Color& color);
+    Icon& set_color(const Color& color);
     const Color& color() const { return color_; }
+    Icon& color(const Color& color) { return set_color(color); }
 
     Size measure_impl(Size available, const PaintContext* ctx) override;
     void paint_impl(PaintContext& ctx) override;

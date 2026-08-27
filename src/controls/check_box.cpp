@@ -12,16 +12,18 @@ CheckBox::CheckBox(String text) : text_(std::move(text)) {
     set_cursor(Cursor::Hand);
 }
 
-void CheckBox::set_text(const String& text) {
-    if (text_ == text) return;
+CheckBox& CheckBox::set_text(const String& text) {
+    if (text_ == text) return *this;
     text_ = text;
     invalidate();
+    return *this;
 }
 
-void CheckBox::set_checked(bool checked) {
-    if (checked_ == checked) return;
+CheckBox& CheckBox::set_checked(bool checked) {
+    if (checked_ == checked) return *this;
     checked_ = checked;
     invalidate();
+    return *this;
 }
 
 Size CheckBox::measure_impl(Size available, const PaintContext* ctx) {
