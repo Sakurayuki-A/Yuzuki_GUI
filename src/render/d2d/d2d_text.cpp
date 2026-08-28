@@ -86,7 +86,45 @@ FontId D2DBackend::create_font(const FontSpec& spec) {
         DWRITE_FONT_STRETCH_NORMAL, spec.size, L"", &format);
     if (FAILED(hr)) return kInvalidFont;
 
+    FontVMetrics vm;
+    // Resolve the resolved font face metrics (design units) to pixels at this size.
+    Microsoft::WRL::ComPtr<IDWriteTextFormat1> format1;
+    if (SUCCEEDED(format.As(&format1))) {
+        Microsoft::WRL::ComPtr<IDWriteFontCollection> coll;
+        hr = format1->GetFontCollection(&coll);
+        if (SUCCEEDED(hr) && coll) {
+            UINT32 family_index = 0;
+            BOOL exists = FALSE;
+            const WString family = utf::to_wide(spec.family);
+            hr = coll->FindFamilyName(family.c_str(), &family_index, &exists);
+            if (SUCCEEDED(hr) && exists) {
+                Microsoft::WRL::ComPtr<IDWriteFontFamily> fam;
+                if (SUCCEEDED(coll->GetFontFamily(family_index, &fam))) {
+                    Microsoft::WRL::ComPtr<IDWriteFont> face;
+                    if (SUCCEEDED(fam->GetFirstMatchingFont(
+                            static_cast<DWRITE_FONT_WEIGHT>(spec.weight),
+                            DWRITE_FONT_STRETCH_NORMAL,
+                            spec.italic ? DWRITE_FONT_STYLE_ITALIC : DWRITE_FONT_STYLE_NORMAL,
+                            &face))) {
+                        Microsoft::WRL::ComPtr<IDWriteFontFace> font_face;
+                        if (SUCCEEDED(face->CreateFontFace(&font_face))) {
+                            DWRITE_FONT_METRICS m{};
+                            font_face->GetMetrics(&m);
+                            if (m.designUnitsPerEm > 0) {
+                                const f32 scale = spec.size / static_cast<f32>(m.designUnitsPerEm);
+                                vm.ascent = static_cast<f32>(m.ascent) * scale;
+                                vm.descent = static_cast<f32>(m.descent) * scale;
+                                vm.valid = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fonts_.push_back(std::move(format));
+    font_vmetrics_.push_back(vm);
     const FontId id = static_cast<FontId>(fonts_.size());
     font_cache_[spec] = id;
     return id;
@@ -271,10 +309,23 @@ void D2DBackend::draw_text(FontId font, const String& text, const RectF& rect,
         case TextAlignH::Center: origin.x = rect.left + (rect.width() - metrics.width) / 2.0f; break;
         case TextAlignH::Right: origin.x = rect.right - metrics.width; break;
     }
+
+    // Vertical alignment is BASELINE-driven and uses the font's em box (ascent +
+    // descent), NOT layout metrics.height — metrics.height includes lineGap, so a
+    // line-box-based "center" would offset the glyph ink away from the rect center.
+    // The baseline is then pixel-snapped (see below), so ink rows align on whole
+    // device pixels across widgets.
+    bool has_metrics = font_vmetrics_.size() >= font && font_vmetrics_[font - 1].valid;
+    const f32 ascent = has_metrics ? font_vmetrics_[font - 1].ascent : metrics.height;
+    const f32 descent = has_metrics ? font_vmetrics_[font - 1].descent : 0.0f;
+
+    f32 baseline = rect.top;
     switch (align_v) {
-        case TextAlignV::Top: origin.y = rect.top; break;
-        case TextAlignV::Center: origin.y = rect.top + (rect.height() - metrics.height) / 2.0f; break;
-        case TextAlignV::Bottom: origin.y = rect.bottom - metrics.height; break;
+        case TextAlignV::Top: baseline = rect.top + ascent; break;
+        case TextAlignV::Center:
+            baseline = rect.top + (rect.height() - (ascent + descent)) / 2.0f + ascent;
+            break;
+        case TextAlignV::Bottom: baseline = rect.bottom - descent; break;
     }
 
     // Pixel-snap the BASELINE (Y) to whole device pixels: keeps rows crisp and
@@ -286,8 +337,12 @@ void D2DBackend::draw_text(FontId font, const String& text, const RectF& rect,
     // elsewhere and snapping there would fight animations (rotate/scale sampling).
     if (visual_transform_stack_.empty()) {
         const f32 scale = dpi_ / 96.0f;
-        origin.y = std::round(origin.y * scale) / scale;
+        baseline = std::round(baseline * scale) / scale;
     }
+
+    // DrawTextLayout's origin is the layout box top; the baseline sits `ascent`
+    // below it (font design ascent in DIPs). Recover the box top from the baseline.
+    origin.y = baseline - ascent;
 
     context_->DrawTextLayout(origin, layout.Get(), brush_.Get());
 }

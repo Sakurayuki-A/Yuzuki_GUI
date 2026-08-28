@@ -1,6 +1,7 @@
 #pragma once
 #include <yuzuki/ui/widget.hpp>
 #include <yuzuki/ui/paint.hpp>
+#include <yuzuki/ui/icon.hpp>
 
 #include <functional>
 
@@ -16,6 +17,22 @@ public:
         invalidate();
         return *this;
     }
+
+    // Optional icon glyph drawn before the text (via the global Icon Provider).
+    Button& set_icon(IconId icon) {
+        icon_ = icon;
+        invalidate();
+        return *this;
+    }
+    IconId icon() const { return icon_; }
+    Button& icon(IconId icon) { return set_icon(icon); }
+
+    Button& set_icon_size(f32 size) {
+        icon_size_ = size;
+        invalidate();
+        return *this;
+    }
+    f32 icon_size() const { return icon_size_; }
 
     Button& set_min_width(f32 width) {
         min_width_ = width;
@@ -63,6 +80,8 @@ private:
     f32 min_width_ = 80.0f;
     f32 padding_ = 10.0f;
     bool accent_ = true;
+    IconId icon_ = IconId::None;
+    f32 icon_size_ = 16.0f;
     std::function<void()> on_click_cb_;
 };
 

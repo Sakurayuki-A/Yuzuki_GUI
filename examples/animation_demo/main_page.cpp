@@ -382,11 +382,9 @@ void ExpandingCard::paint_impl(PaintContext& ctx) {
                         RectF::make(bounds_.right - 64.0f, bounds_.top, 34.0f, 40.0f),
                         demo::TextSecondary(), TextAlignH::Left, TextAlignV::Center);
 
-    const FontId icon_font = ctx.font(icon_family, 12.0f);
-    ctx.draw_text(icon_font,
-                  icon_glyph(expanded_ ? IconId::CaretDown : IconId::CaretRight),
+    ctx.draw_icon(expanded_ ? IconId::CaretDown : IconId::CaretRight,
                   RectF::make(bounds_.right - 30.0f, bounds_.top, 18.0f, 40.0f),
-                  demo::TextSecondary());
+                  demo::TextSecondary(), 12.0f);
 
     if (expand_progress_ > 0.0f) {
         const f32 body_h = bounds_.height() - 40.0f;

@@ -157,6 +157,7 @@ private:
     f32 grab_dy_ = 0.0f;
     bool press_armed_ = false;
     bool dragging_ = false;
+    bool dblclk_pending_ = false;  // WM_LBUTTONDBLCLK seen; next left-up becomes DoubleClick
 
     // Damage strategy: intersecting rects merge; over the cap the whole window
     // invalidates (damage_full_). Each damage rect is clipped and partially Presented.
@@ -191,6 +192,10 @@ private:
     void* ime_prev_context_ = nullptr;  // HIMC saved while IME is disabled
     bool ime_disabled_ = false;
     WString ime_text_buffer_;           // payload storage; valid during event dispatch
+
+    // ===== File drop (WM_DROPFILES) =====
+    std::vector<String> drop_files_;    // payload storage; valid during event dispatch
+    void on_drop_files(void* hdrop);
 
     // ===== Coalesced resize broadcast =====
     u32 last_resize_px_w_ = 0;

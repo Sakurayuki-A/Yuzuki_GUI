@@ -4,7 +4,10 @@
 
 #include <yuzuki/controls/tooltip.hpp>
 #include <yuzuki/controls/button.hpp>
+#include <yuzuki/core/encoding.hpp>
 #include "window_internal.hpp"
+
+#include <shellapi.h>
 
 #include <algorithm>
 
@@ -226,6 +229,10 @@ void Window::on_mouse_input(u32 message, f32 x_px, f32 y_px, u8 buttons, u8 mods
         press_x_ = x;
         press_y_ = y;
         press_armed_ = true;
+        // WM_LBUTTONDBLCLK follows a first click; the standard sequence is down→up
+        // (Click)→DBLCLK-down→up. The final up must surface as DoubleClick instead of
+        // a second Click so controls can distinguish tap vs double-tap.
+        if (message == WM_LBUTTONDBLCLK) dblclk_pending_ = true;
         if (target && target->focusable()) {
             set_focus(target);
             focus_visible_ = false;  // mouse clicks don't show the focus ring
@@ -277,10 +284,13 @@ void Window::on_mouse_input(u32 message, f32 x_px, f32 y_px, u8 buttons, u8 mods
 
         if (hit_test(x, y) == target) {
             Event click;
-            click.type = EventType::Click;
+            click.type = dblclk_pending_ && (up_buttons & MouseButton_Left)
+                             ? EventType::DoubleClick
+                             : EventType::Click;
             click.data.mouse = MouseData{x, y, up_buttons, mods};
             dispatch(target, click);
         }
+        dblclk_pending_ = false;
         capture_ = nullptr;
         ReleaseCapture();
         update_hover(x, y);
@@ -296,6 +306,34 @@ void Window::on_wheel(f32 x_dip, f32 y_dip, i16 delta, u8 mods) {
     wheel.type = EventType::Wheel;
     wheel.data.mouse = MouseData{x_dip, y_dip, MouseButton_None, mods, delta};
     dispatch(target, wheel);
+}
+
+void Window::on_drop_files(void* hdrop) {
+    HDROP h = static_cast<HDROP>(hdrop);
+    if (!h) return;
+    const UINT count = DragQueryFileW(h, 0xFFFFFFFF, nullptr, 0);
+    drop_files_.clear();
+    for (UINT i = 0; i < count; ++i) {
+        const UINT len = DragQueryFileW(h, i, nullptr, 0);
+        WString wpath(static_cast<size_t>(len), L'\0');
+        DragQueryFileW(h, i, wpath.data(), len + 1);
+        drop_files_.push_back(utf::to_utf8(wpath));
+    }
+    // Drop point in DIPs: the cursor is in screen coords; convert to this window.
+    POINT pt{};
+    GetCursorPos(&pt);
+    ScreenToClient(static_cast<HWND>(hwnd_), &pt);
+    const f32 scale = backend_ ? backend_->dpi_scale() : 1.0f;
+    const f32 x = static_cast<f32>(pt.x) / scale;
+    const f32 y = static_cast<f32>(pt.y) / scale;
+
+    Event drop;
+    drop.type = EventType::DropFiles;
+    drop.data.drop.files = &drop_files_;
+    drop.data.drop.x = x;
+    drop.data.drop.y = y;
+    Widget* target = hit_test(x, y);
+    if (target) dispatch(target, drop);
 }
 
 void Window::focus_next(bool reverse) {

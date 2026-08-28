@@ -127,6 +127,18 @@ add_custom_command(TARGET showcase POST_BUILD
         ${CMAKE_SOURCE_DIR}/icofonts/regular/Phosphor.ttf
         $<TARGET_FILE_DIR:showcase>/Phosphor.ttf)
 
+add_executable(explorer
+    explorer/main.cpp
+    explorer/app.cpp)
+target_link_libraries(explorer PRIVATE yuzuki)
+add_custom_command(TARGET explorer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/uiFonts/regular/LexendDeca-Regular.ttf
+        $<TARGET_FILE_DIR:explorer>/LexendDeca-Regular.ttf
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/icofonts/regular/Phosphor.ttf
+        $<TARGET_FILE_DIR:explorer>/Phosphor.ttf)
+
 add_executable(playground
     playground/main.cpp
     playground/app.cpp)

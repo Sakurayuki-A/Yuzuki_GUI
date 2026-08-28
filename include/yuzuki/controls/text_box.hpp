@@ -3,6 +3,8 @@
 #include <yuzuki/ui/widget.hpp>
 #include <yuzuki/ui/paint.hpp>
 
+#include <functional>
+
 namespace yzk {
 
 enum class TextBoxMode : u8 {
@@ -36,6 +38,13 @@ public:
 
     const TextBoxConfig& config() const { return config_; }
     TextBox& set_config(const TextBoxConfig& config);
+
+    // Enter-to-submit callback for SingleLine mode (ignored in MultiLine / Password passthrough).
+    TextBox& set_on_commit(std::function<void()> cb) {
+        on_commit_cb_ = std::move(cb);
+        return *this;
+    }
+    TextBox& on_commit(std::function<void()> cb) { return set_on_commit(std::move(cb)); }
 
     bool read_only() const { return config_.read_only; }
     TextBox& set_read_only(bool read_only);
@@ -81,6 +90,7 @@ private:
     WString text_;
     String placeholder_;
     TextBoxConfig config_;
+    std::function<void()> on_commit_cb_;
     u32 cursor_ = 0;
     u32 sel_start_ = 0;
     bool focused_ = false;

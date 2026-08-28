@@ -1,6 +1,7 @@
 #pragma once
 #include <yuzuki/render/backend.hpp>
 #include <yuzuki/ui/theme.hpp>
+#include <yuzuki/ui/icon.hpp>
 
 #include <map>
 #include <vector>
@@ -125,6 +126,11 @@ public:
     Size measure_text(const String& text) const;
     Size measure_text(const String& text, bool small) const;
     Size measure_text(const String& text, bool small, f32 max_width) const;
+
+    // One-line icon draw. Uses the global Icon Provider (default: Phosphor);
+    // the provider's font files are registered lazily on first use, and the
+    // glyph is rendered at `size` centered in `rect`.
+    void draw_icon(IconId id, const RectF& rect, const Color& color, f32 size) const;
 
     RenderBackend& backend() const { return backend_; }
     const Theme& theme() const { return theme_; }

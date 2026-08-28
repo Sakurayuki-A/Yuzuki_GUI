@@ -1,4 +1,7 @@
 #include <yuzuki/controls/list_view.hpp>
+#include <yuzuki/ui/window.hpp>
+
+#include <windows.h>
 
 #include <algorithm>
 #include <cmath>
@@ -193,6 +196,42 @@ void ListView::paint_impl(PaintContext& ctx) {
 
 void ListView::on_event(Event& e) {
     switch (e.type) {
+        case EventType::DoubleClick:
+            if (enabled() && (e.data.mouse.buttons & MouseButton_Left)) {
+                const RectF g = global_bounds();
+                const i32 row = row_at_y(e.data.mouse.y - g.top);
+                if (row >= 0) {
+                    on_activate(row);
+                    e.consumed = true;
+                }
+            }
+            break;
+
+        case EventType::KeyDown: {
+            const u32 code = e.data.key.code;
+            if (code == VK_UP || code == VK_DOWN || code == VK_HOME || code == VK_END) {
+                e.consumed = true;
+                if (count() == 0) break;
+                i32 next = selected_;
+                switch (code) {
+                    case VK_UP: next = selected_ <= 0 ? 0 : selected_ - 1; break;
+                    case VK_DOWN: next = selected_ < 0 ? 0 : std::min(selected_ + 1, count() - 1); break;
+                    case VK_HOME: next = 0; break;
+                    case VK_END: next = count() - 1; break;
+                }
+                set_selected(next);
+                // Reveal the newly selected row if it sits outside the visible viewport.
+                const f32 row_top = static_cast<f32>(next) * row_height_;
+                const f32 view_h = bounds_.height();
+                if (row_top < scroll_y_) set_scroll_y(row_top);
+                else if (row_top + row_height_ > scroll_y_ + view_h) set_scroll_y(row_top + row_height_ - view_h);
+            } else if (code == VK_RETURN && selected_ >= 0) {
+                e.consumed = true;
+                on_activate(selected_);
+            }
+            break;
+        }
+
         case EventType::Wheel:
             if (max_scroll_ > 0.0f) {
                 scroll_by(-static_cast<f32>(e.data.mouse.wheel_delta) / 120.0f * kWheelStep);

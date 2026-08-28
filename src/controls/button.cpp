@@ -16,8 +16,15 @@ Button::Button(String text) : text_(std::move(text)) {
 
 Size Button::measure_impl(Size available, const PaintContext* ctx) {
     (void)available;
-    (void)ctx;
-    return Size{min_width_, 32.0f};
+    if (icon_ != IconId::None && text_.empty()) {
+        const f32 side = icon_size_ + (padding_ * 2.0f);
+        return Size{side, side};
+    }
+    f32 w = min_width_;
+    if (icon_ != IconId::None && ctx) {
+        w += icon_size_ + 6.0f;  // offset_t icon + gap + original min width
+    }
+    return Size{w, 32.0f};
 }
 
 void Button::paint_impl(PaintContext& ctx) {
@@ -44,7 +51,21 @@ void Button::paint_impl(PaintContext& ctx) {
 
     ctx.fill_rounded(bounds_, fill, radius);
     ctx.draw_border(bounds_, border, 1.0f, radius);
-    ctx.draw_text(text_, bounds_, text_color);
+
+    if (icon_ != IconId::None) {
+        const f32 icon_w = text_.empty() ? icon_size_ : icon_size_ + 6.0f;
+        const f32 icon_left = text_.empty() ? bounds_.left + (bounds_.width() - icon_size_) / 2.0f
+                                            : bounds_.left + padding_;
+        ctx.draw_icon(icon_, RectF::make(icon_left, bounds_.top, icon_size_, bounds_.height()),
+                      text_color, icon_size_);
+        if (text_.empty()) return;
+        ctx.draw_text(text_, RectF::make(bounds_.left + padding_ + icon_w, bounds_.top,
+                                         bounds_.width() - (padding_ + icon_w) * 2.0f,
+                                         bounds_.height()),
+                      text_color);
+    } else {
+        ctx.draw_text(text_, bounds_, text_color);
+    }
 }
 
 void Button::on_event(Event& e) {

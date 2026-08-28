@@ -1,5 +1,7 @@
 #include <yuzuki/yuzuki.hpp>
 
+#include <windows.h>
+
 #include <cstdio>
 
 using namespace yzk;
@@ -722,6 +724,69 @@ void test_list_view_data_source() {
     CHECK(lv.row_delegate() == nullptr);
 }
 
+void test_list_view_keyboard() {
+    ListView lv;
+    std::vector<String> items;
+    for (int i = 0; i < 10; ++i) items.push_back("item " + std::to_string(i));
+    lv.set_items(items);
+
+    // Arrow keys walk the selection.
+    Event down;
+    down.type = EventType::KeyDown;
+    down.data.key.code = VK_DOWN;
+    lv.on_event(down);
+    CHECK(lv.selected() == 0);  // first Down selects row 0
+    for (int i = 0; i < 5; ++i) lv.on_event(down);
+    CHECK(lv.selected() == 5);
+
+    Event up;
+    up.type = EventType::KeyDown;
+    up.data.key.code = VK_UP;
+    lv.on_event(up);
+    CHECK(lv.selected() == 4);
+    // Up at the top stays clamped at 0 (does not wrap).
+    while (lv.selected() > 0) lv.on_event(up);
+    lv.on_event(up);
+    CHECK(lv.selected() == 0);
+
+    Event home;
+    home.type = EventType::KeyDown;
+    home.data.key.code = VK_HOME;
+    lv.on_event(home);
+    CHECK(lv.selected() == 0);
+
+    Event end;
+    end.type = EventType::KeyDown;
+    end.data.key.code = VK_END;
+    lv.on_event(end);
+    CHECK(lv.selected() == 9);
+    lv.on_event(down);  // Down past the last row stays clamped
+    CHECK(lv.selected() == 9);
+
+    // Enter activates the selected row.
+    int activated = -1;
+    lv.on_activate([&](i32 i) { activated = i; });
+    Event enter;
+    enter.type = EventType::KeyDown;
+    enter.data.key.code = VK_RETURN;
+    lv.on_event(enter);
+    CHECK(activated == 9);
+
+    // Double-click activates the row under the pointer.
+    activated = -1;
+    lv.set_bounds(RectF::make(0.0f, 0.0f, 200.0f, 300.0f));
+    lv.set_scroll_y(0.0f);
+    Event dbl;
+    dbl.type = EventType::DoubleClick;
+    dbl.data.mouse = MouseData{50.0f, 3.0f * lv.row_height() + 5.0f, MouseButton_Left, 0};
+    lv.on_event(dbl);
+    CHECK(activated == 3);
+
+    // Wheel pans only when there is overflow; keyboard nav never wraps.
+    lv.on_event(down);
+    CHECK(activated == 3);  // selection changes do not re-fire activate
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle stress: the frame must stay safe across dynamic add/remove,
 // destroyed-widget re-attach, cascading destruction, and callback re-entry.
@@ -1007,6 +1072,7 @@ int main() {
     test_combo_box();
     test_list_view();
     test_list_view_data_source();
+    test_list_view_keyboard();
     test_lifecycle_dynamic_add_remove();
     test_lifecycle_callback_dangling();
     test_lifecycle_cascading_destroy();

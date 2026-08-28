@@ -431,6 +431,14 @@ Size PaintContext::measure_text(FontId font, const String& text) const {
     return backend_.measure_text(font, text, 1e7f);
 }
 
+void PaintContext::draw_icon(IconId id, const RectF& rect, const Color& color, f32 size) const {
+    if (color.is_transparent() || id == IconId::None) return;
+    icon::IconProvider& p = icon::provider();
+    p.register_resources(backend_);
+    const FontId font = this->font(p.family(), size);
+    draw_text(font, p.glyph(id), rect, color);
+}
+
 Size PaintContext::measure_text(const String& text) const {
     return backend_.measure_text(font_, text, 1e7f);
 }

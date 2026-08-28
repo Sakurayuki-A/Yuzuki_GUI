@@ -84,6 +84,18 @@ public:
         if (on_selected_cb_) on_selected_cb_(index);
     }
 
+    // Double-click (or Enter) activation callback; the virtual hook below fires with it.
+    ListView& set_on_activate(std::function<void(i32)> cb) {
+        on_activate_cb_ = std::move(cb);
+        return *this;
+    }
+    // Fluent short name (Lego-style); same as set_on_activate.
+    ListView& on_activate(std::function<void(i32)> cb) { return set_on_activate(std::move(cb)); }
+
+    virtual void on_activate(i32 index) {
+        if (on_activate_cb_) on_activate_cb_(index);
+    }
+
     Size measure_impl(Size available, const PaintContext* ctx) override;
     void paint_impl(PaintContext& ctx) override;
     void on_event(Event& e) override;
@@ -110,6 +122,7 @@ private:
     bool dragging_thumb_ = false;
     f32 drag_grab_ = 0.0f;
     std::function<void(i32)> on_selected_cb_;
+    std::function<void(i32)> on_activate_cb_;
 };
 
 }  // namespace yzk

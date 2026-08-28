@@ -24,6 +24,7 @@ add_library(yuzuki STATIC
     src/ui/window_input.cpp
     src/ui/window_borderless.cpp
     src/ui/window_wndproc.cpp
+    src/ui/icon_provider.cpp
     src/overlay.cpp
     src/controls/label.cpp
     src/controls/button.cpp

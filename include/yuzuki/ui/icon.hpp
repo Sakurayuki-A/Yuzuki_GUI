@@ -1,12 +1,48 @@
 #pragma once
 #include <yuzuki/core/types.hpp>
+#include <memory>
 
-// Icon system: Phosphor icon font (MIT license). Icons are font glyphs — vector
-// rendered, DPI-independent. Load the TTF via backend().add_font_file()
-// ("Phosphor-Regular.ttf"); the family name is fixed as icon_family.
+// Icon system (Yuzuki Icon API): a global Icon Provider abstraction.
+//
+// Controls only speak IconId — the provider owns every backend detail (font file
+// location, load timing, font family name, DirectWrite FontFace, glyph codepoint).
+// The default provider renders Phosphor icon font (MIT license); swap providers
+// (Material Symbols, Font Awesome, SVG…) without touching Button/Menu/TreeView.
 namespace yzk {
 
+class RenderBackend;
+
+enum class IconId : u32;
+
 constexpr const char* icon_family = "Phosphor";
+
+namespace icon {
+
+class IconProvider {
+public:
+    virtual ~IconProvider() = default;
+    // Font family name the provider's glyphs are drawn with.
+    virtual const char* family() const = 0;
+    // IconId -> UTF-8 glyph string (drawn with family()).
+    virtual String glyph(IconId id) const = 0;
+    // Idempotent: registers the provider's font files on the backend (called by
+    // PaintContext::draw_icon on each first-use per backend). Returns false on failure.
+    virtual bool register_resources(RenderBackend& backend) = 0;
+};
+
+// Built-in Phosphor icon font provider — the default. Locates Phosphor.ttf next to
+// the executable; override the path via icon::set_phosphor_font_file() before first draw.
+IconProvider& phosphor_provider();
+// Optional: point the Phosphor provider at a custom TTF path.
+void set_phosphor_font_file(const String& path);
+
+// Installs the app-wide icon provider (default: Phosphor). Yuzuki comes with a
+// built-in PhosphorIconProvider; call set_provider to swap the icon backend.
+// Takes ownership of the provider; passing nullptr restores the default.
+void set_provider(std::unique_ptr<IconProvider> provider);
+IconProvider& provider();
+
+}  // namespace icon
 
 enum class IconId : u32 {
     None = 0,
@@ -134,11 +170,9 @@ inline void append_utf8(String& out, u32 cp) {
 
 }  // namespace icon_detail
 
-// Icon ID -> UTF-8 glyph string (for draw_text)
-inline String icon_glyph(IconId id) {
-    String s;
-    icon_detail::append_utf8(s, static_cast<u32>(id));
-    return s;
-}
+// Icon ID -> UTF-8 glyph string (for draw_text). Backed by the global provider;
+// kept as a light alias so raw canvas drawing can stay one-liners, but controls
+// should prefer PaintContext::draw_icon.
+inline String icon_glyph(IconId id) { return icon::provider().glyph(id); }
 
 }  // namespace yzk

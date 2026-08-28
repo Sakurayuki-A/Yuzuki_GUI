@@ -9,6 +9,11 @@
 #include "render/d2d/d2d_backend.hpp"
 
 #include <imm.h>
+#include <shellapi.h>
+
+#ifdef _MSC_VER
+#pragma comment(lib, "shell32.lib")
+#endif
 
 namespace yzk {
 
@@ -61,6 +66,7 @@ bool Window::create(void* instance) {
 
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
     hwnd_ = hwnd;
+    DragAcceptFiles(hwnd, TRUE);
 
     const u32 dpi = GetDpiForWindow(hwnd);
     const f32 scale = static_cast<f32>(dpi) / 96.0f;

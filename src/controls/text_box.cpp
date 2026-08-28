@@ -443,6 +443,8 @@ void TextBox::on_event(Event& e) {
                             sel_start_ = cursor_;
                             invalidate();
                         }
+                    } else if (on_commit_cb_) {
+                        on_commit_cb_();
                     }
                     e.consumed = true;
                     break;

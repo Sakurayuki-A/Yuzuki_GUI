@@ -1,6 +1,8 @@
 #pragma once
 #include <yuzuki/core/types.hpp>
 
+#include <vector>
+
 namespace yzk {
 
 enum class EventType : u8 {
@@ -11,6 +13,7 @@ enum class EventType : u8 {
     MouseDown,
     MouseUp,
     Click,
+    DoubleClick,
     KeyDown,
     KeyUp,
     Character,
@@ -24,6 +27,7 @@ enum class EventType : u8 {
     DragEnd,
     ImeCompose,   // composition (pre-edit) string updated; text may be empty (cancelled)
     ImeCommit,    // final committed string
+    DropFiles,    // files dropped onto the window; data.drop.files + position
 };
 
 enum MouseButton : u8 {
@@ -70,11 +74,19 @@ struct SizeData {
     f32 height = 0.0f;
 };
 
+struct DropData {
+    // Not owned by the event: points into Window-owned storage valid during dispatch.
+    const std::vector<String>* files = nullptr;
+    f32 x = 0.0f;  // drop point in DIPs (window client)
+    f32 y = 0.0f;
+};
+
 union EventData {
     MouseData mouse;
     KeyData key;
     ImeData ime;
     SizeData size;
+    DropData drop;
 };
 
 struct Event {

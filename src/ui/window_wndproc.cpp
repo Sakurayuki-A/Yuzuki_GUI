@@ -7,6 +7,7 @@
 
 #include <windowsx.h>
 #include <imm.h>
+#include <shellapi.h>
 
 namespace yzk {
 
@@ -235,6 +236,10 @@ LRESULT CALLBACK Window::wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpa
                 return TRUE;
             }
             break;
+
+        case WM_DROPFILES:
+            if (self) self->on_drop_files(reinterpret_cast<void*>(wparam));
+            return 0;
 
         case WM_CLOSE:
             // Full teardown (resets hwnd_/state/render target); the Window can be re-created

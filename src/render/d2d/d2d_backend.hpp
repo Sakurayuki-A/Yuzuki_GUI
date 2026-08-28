@@ -231,6 +231,15 @@ private:
     };
     std::vector<FontFileEntry> font_files_;
     std::vector<Microsoft::WRL::ComPtr<IDWriteTextFormat>> fonts_;
+    // Pixel-space vertical metrics (at the font's creation size), parallel to fonts_.
+    // Used for optical vertical alignment: glyph ink sits between ascent and descent;
+    // metrics.height also includes lineGap, which must NOT participate in centering.
+    struct FontVMetrics {
+        f32 ascent = 0.0f;
+        f32 descent = 0.0f;
+        bool valid = false;
+    };
+    std::vector<FontVMetrics> font_vmetrics_;
     std::map<FontSpec, FontId> font_cache_;
     std::map<TextLayoutKey, TextLayoutEntry> layout_cache_;
     // LRU order: list head is most-recently-used, tail is least-recently-used.

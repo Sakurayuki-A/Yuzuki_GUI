@@ -124,10 +124,9 @@ void Notification::paint_impl(PaintContext& ctx) {
     ctx.fill_rounded(rect, card, 8.0f);
     ctx.draw_border(rect, border, 1.0f, 8.0f);
 
-    const FontId icon_font = ctx.font(icon_family, 18.0f);
     const Color icon_color = accent.with_alpha((u8)(accent.a * p));
-    ctx.draw_text(icon_font, icon_glyph(type_icon(type_)),
-                  RectF::make(rect.left + 14.0f, rect.top + 10.0f, 20.0f, 20.0f), icon_color);
+    ctx.draw_icon(type_icon(type_), RectF::make(rect.left + 14.0f, rect.top + 10.0f, 20.0f, 20.0f),
+                  icon_color, 18.0f);
 
     ctx.draw_text(title_, RectF::make(rect.left + 40.0f, rect.top + 9.0f,
                                       rect.width() - 72.0f, 20.0f),
@@ -141,8 +140,8 @@ void Notification::paint_impl(PaintContext& ctx) {
     }
 
     const Color close_color = (hovered_ ? text : secondary).with_alpha((u8)(secondary.a * p));
-    ctx.draw_text(ctx.font(icon_family, 13.0f), icon_glyph(IconId::X),
-                  RectF::make(rect.right - 28.0f, rect.top + 10.0f, 18.0f, 18.0f), close_color);
+    ctx.draw_icon(IconId::X, RectF::make(rect.right - 28.0f, rect.top + 10.0f, 18.0f, 18.0f),
+                  close_color, 13.0f);
 }
 
 void Notification::on_event(Event& e) {

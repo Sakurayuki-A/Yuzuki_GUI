@@ -81,11 +81,9 @@ void RoundButton::paint_impl(PaintContext& ctx) {
                                         bounds_.height());
     ctx.draw_text(text_, text_rect, text_color_);
     if (icon_ != IconId::None) {
-        const FontId icon_font = ctx.font(icon_family, icon_size_);
-        ctx.draw_text(icon_font, icon_glyph(icon_),
-                      RectF::make(bounds_.left + padding_x_, bounds_.top, icon_size_,
-                                  bounds_.height()),
-                      text_color_);
+        ctx.draw_icon(icon_, RectF::make(bounds_.left + padding_x_, bounds_.top, icon_size_,
+                                         bounds_.height()),
+                      text_color_, icon_size_);
     }
 }
 
@@ -274,11 +272,9 @@ void ToolCard::paint_impl(PaintContext& ctx) {
                         RectF::make(bounds_.right - sw - 30.0f, bounds_.top, sw, 34.0f),
                         codex::TextSecondary, TextAlignH::Left, TextAlignV::Center);
 
-    const FontId icon_font = ctx.font(icon_family, 12.0f);
-    ctx.draw_text(icon_font,
-                  icon_glyph(expanded_ ? IconId::CaretDown : IconId::CaretRight),
+    ctx.draw_icon(expanded_ ? IconId::CaretDown : IconId::CaretRight,
                   RectF::make(bounds_.right - 26.0f, bounds_.top, 18.0f, 34.0f),
-                  codex::TextSecondary);
+                  codex::TextSecondary, 12.0f);
 
     if (expand_progress_ > 0.0f) {
         const f32 body_h = bounds_.height() - 34.0f;

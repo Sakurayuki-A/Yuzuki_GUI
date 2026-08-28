@@ -35,8 +35,7 @@ void Icon::paint_impl(PaintContext& ctx) {
     if (id_ == IconId::None) return;
     Color color = color_;
     if (color.is_transparent()) color = ctx.theme().text;
-    const FontId font = ctx.font(icon_family, size_);
-    ctx.draw_text(font, icon_glyph(id_), bounds_, color);
+    ctx.draw_icon(id_, bounds_, color, size_);
 }
 
 }  // namespace yzk
