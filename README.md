@@ -1,15 +1,17 @@
 # YuzukiGUI
 
 A low-footprint, retained-mode C++ UI framework for Windows — built with the hope
-that it becomes the most delightful GUI framework out there. And that's not where
-the ambition stops: the future of Yuzuki should be like LEGO — so simple that a
-middle schooler can pick it up in an afternoon and start building.
+that it becomes the most delightful GUI framework out there. The concrete target,
+the best and most realistic one: Electron's development experience — write the UI
+like a script, watch it rebuild and rerun in seconds, compose pages out of plain
+widgets — on a native GUI's resource footprint: tens of MB of memory, near-idle CPU
+when nothing animates. Not a Chromium in a trench coat.
 
 Today, Yuzuki is already zero-dependency and hardware accelerated, with one header to
 include and a few lines to your first window. A static window sits at near-0% CPU idle
 (no render loop — measured ~0% on a modern machine; only continuous animations, like an
-indeterminate progress bar, drive a small constant load). It's not LEGO yet, but that's
-where it's going.
+indeterminate progress bar, drive a small constant load). It's not Electron-smooth yet,
+but that's where it's going.
 
 ```cpp
 #include <yuzuki/yuzuki.hpp>
@@ -39,14 +41,17 @@ cmake --build build --config Release
 build\examples\Release\hello.exe
 ```
 
-## The LEGO vision
+## The vision: Electron's DX, native's footprint
 
-What "simple like LEGO" means for Yuzuki's future:
+What "Electron's development experience on a native resource budget" means for
+Yuzuki's future — the best and most realistic target:
 
 - **Retained mode, zero magic**: a window is a tree of widgets. Stack them, dock them, flex them — what you see is what you wrote.
+- **Script-like iteration**: one header, one file, rebuild and rerun in seconds. No bundlers, no layers of tooling between you and pixels.
 - **One concept at a time**: `Label`, `Button`, `ListView`, `Slider`... each control does exactly what its name says.
 - **Events by overriding**: want a button to do something? Subclass it and override `on_click()`. No callbacks, no signal spaghetti.
 - **Everything is optional**: dark theme, animations, icons, borderless windows — add them when you need them.
+- **Native, not Chromium**: that development loop must ride on tens of MB and near-idle CPU, not a bundled browser.
 
 ## What's inside
 
