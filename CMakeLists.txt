@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(YuzukiUI
-    VERSION 0.2.0
+    VERSION 0.3.0
     DESCRIPTION "A low-footprint retained-mode C++ UI framework"
     LANGUAGES CXX)
 
@@ -20,12 +20,16 @@ add_library(yuzuki STATIC
     src/paint.cpp
     src/widget.cpp
     src/window.cpp
+    src/ui/clipboard.cpp
+    src/ui/dialog.cpp
     src/ui/window_frame.cpp
     src/ui/window_input.cpp
     src/ui/window_borderless.cpp
     src/ui/window_wndproc.cpp
     src/ui/icon_provider.cpp
     src/overlay.cpp
+    src/debug_overlay.cpp
+    src/widget_inspector.cpp
     src/controls/label.cpp
     src/controls/button.cpp
     src/controls/stack_panel.cpp
@@ -50,6 +54,7 @@ add_library(yuzuki STATIC
     src/controls/image.cpp
     src/controls/tooltip.cpp
     src/controls/context_menu.cpp
+    src/controls/tab_control.cpp
     src/controls/backdrop_blur.cpp
     src/render/d2d/d2d_backend.cpp
     src/render/d2d/d2d_text.cpp
@@ -63,7 +68,7 @@ target_include_directories(yuzuki PUBLIC
 
 target_compile_features(yuzuki PUBLIC cxx_std_17)
 
-target_link_libraries(yuzuki PUBLIC d2d1 dwrite dxgi d3d11 d3dcompiler winmm imm32)
+target_link_libraries(yuzuki PUBLIC d2d1 dwrite dxgi d3d11 d3dcompiler winmm imm32 psapi ole32 shell32)
 
 if(MSVC)
     target_compile_options(yuzuki PRIVATE /W4 /permissive- /utf-8 /EHsc)
@@ -77,5 +82,6 @@ if(MSVC)
 endif()
 
 enable_testing()
+include(cmake/yuzuki_app_shell.cmake)
 add_subdirectory(examples)
 add_subdirectory(tests)

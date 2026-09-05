@@ -60,6 +60,9 @@ public:
 
     virtual bool create_target(void* native_window, u32 width_px, u32 height_px, u32 dpi) = 0;
     virtual void destroy_target() = 0;
+    // Simulates a full device-loss recovery cycle (destroy + recreate with stored params).
+    // Returns true if recreation succeeded.
+    virtual bool recreate_after_loss() { return false; }
     virtual bool resize(u32 width_px, u32 height_px) = 0;
     virtual void set_dpi(u32 dpi) = 0;
     virtual u32 dpi() const = 0;
@@ -111,7 +114,8 @@ public:
     }
     virtual Size bitmap_size(BitmapId id) const = 0;
     virtual void draw_bitmap(BitmapId id, const RectF& rect, f32 radius = 0.0f) = 0;
-    virtual Size measure_text(FontId font, const String& text, f32 max_width) = 0;
+    virtual Size measure_text(FontId font, const String& text, f32 max_width,
+                              bool wrap = true) = 0;
     virtual i32 hit_test_text(FontId font, const String& text, f32 width, f32 x, f32 y) {
         (void)font;
         (void)text;
@@ -138,8 +142,11 @@ public:
         (void)end;
         return {};
     }
+    // wrap=false (default): single-line, DWRITE_WORD_WRAPPING_NO_WRAP. The widget owns
+    // the contract: single-line controls pass no wrap, multi-line ones (TextBox) pass true.
     virtual void draw_text(FontId font, const String& text, const RectF& rect,
-                           const Color& color, TextAlignH align_h, TextAlignV align_v) = 0;
+                           const Color& color, TextAlignH align_h, TextAlignV align_v,
+                           bool wrap = false) = 0;
 
     virtual void fill_rect(const RectF& rect, const Color& color) = 0;
     virtual void fill_rounded(const RectF& rect, const Color& color, f32 radius) = 0;
@@ -169,6 +176,12 @@ public:
                                     f32 radius) = 0;
     virtual void draw_border(const RectF& rect, const Color& color, f32 width, f32 radius) = 0;
     virtual void draw_line(Point a, Point b, const Color& color, f32 width) = 0;
+
+    // Pixel capture: call set_capture_before_frame(true) before begin_frame(),
+    // then capture_pixels() after end_frame() to read back BGRA pixels.
+    virtual void set_capture_before_frame(bool) {}
+    virtual bool capture_pixels(std::vector<u8>&, u32&, u32&) { return false; }
+    virtual void release_capture() {}
 };
 
 }  // namespace yzk

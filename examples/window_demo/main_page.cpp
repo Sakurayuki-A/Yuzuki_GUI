@@ -40,9 +40,14 @@ struct SecondCloseButton : Button {
     void on_click() override { win.close(); }
 };
 
-// Second window (with a system frame)
+// Second window (with a system frame), owned by and modal over the main window
 struct SecondWindow : Window {
-    SecondWindow() : Window("Second Window", 480, 320) {}
+    Window& owner_win;
+    explicit SecondWindow(Window& owner) : Window("Second Window", 480, 320), owner_win(owner) {
+        set_owner(&owner_win);  // 5.2.4: bound to the main window
+        set_modal(true);        // disables the owner while this window is up
+        set_topmost(true);      // stays above the owner at all times
+    }
 
     void open() {
         if (!is_created()) {
@@ -54,6 +59,7 @@ struct SecondWindow : Window {
             set_root(make_page());
         }
         show();
+        loop_until_closed();  // nested message loop until this window closes
     }
 
     Widget* make_page() {
@@ -69,7 +75,7 @@ struct SecondWindow : Window {
         title->set_align(TextAlignH::Left, TextAlignV::Center);
         body->append_child(title);
 
-        auto hint = new Label("A normal framed window, coexisting with the borderless one.");
+        auto hint = new Label("Owned + modal: the main window is disabled until this closes.");
         hint->set_text_role(TextRole::Secondary);
         hint->set_small(true);
         hint->set_align(TextAlignH::Left, TextAlignV::Center);
@@ -83,7 +89,9 @@ struct SecondWindow : Window {
 
 struct OpenSecondButton : Button {
     SecondWindow* second = nullptr;
-    OpenSecondButton() : Button("Open second window") { second = new SecondWindow; }
+    explicit OpenSecondButton(Window& owner) : Button("Open second window") {
+        second = new SecondWindow(owner);
+    }
     void on_click() override { second->open(); }
 };
 
@@ -142,7 +150,7 @@ Widget* make_window_demo_page(Window& window) {
     hint->set_align(TextAlignH::Left, TextAlignV::Center);
     body->append_child(hint);
 
-    auto open = new OpenSecondButton;
+    auto open = new OpenSecondButton(window);
     body->append_child(open);
 
     return root;

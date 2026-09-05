@@ -14,6 +14,9 @@ public:
     f32 scroll_y() const { return scroll_y_; }
     ScrollView& set_scroll_y(f32 y);
     ScrollView& scroll_by(f32 dy);
+    // Scroll to the bottom once the next layout pass has sized the content,
+    // so newly appended content is always visible.
+    ScrollView& scroll_to_bottom();
 
     bool has_scrollbar() const { return max_scroll_ > 0.0f; }
 
@@ -36,6 +39,7 @@ private:
     f32 content_height_ = 0.0f;
     f32 suggested_height_ = 0.0f;
     bool dragging_thumb_ = false;
+    bool pending_bottom_ = false;
     f32 drag_grab_ = 0.0f;
 };
 

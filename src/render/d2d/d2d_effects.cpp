@@ -87,7 +87,11 @@ bool D2DBackend::render_shadow_bitmap(f32 width, f32 height, f32 radius, f32 blu
         (width < height ? width : height) * 0.5f * scale;
     if (corner > max_corner) corner = max_corner;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> white;
-    context_->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f), &white);
+    if (FAILED(context_->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f), &white))) {
+        context_->EndDraw();
+        context_->SetTarget(layer_.Get());
+        return false;
+    }
     context_->FillRoundedRectangle(
         D2D1::RoundedRect(
             D2D1::RectF(pad, pad, pad + width * scale, pad + height * scale), corner, corner),

@@ -3,6 +3,7 @@
 #include <yuzuki/ui/window.hpp>
 
 #include <yuzuki/controls/tooltip.hpp>
+#include <yuzuki/controls/text_box.hpp>
 #include <yuzuki/controls/button.hpp>
 #include <yuzuki/core/encoding.hpp>
 #include "window_internal.hpp"
@@ -368,14 +369,41 @@ void Window::on_key(u32 message, u32 vk, u16 chr, u8 mods, bool repeat) {
         focus_next((GetKeyState(VK_SHIFT) & 0x8000) != 0);
         return;
     }
-    if (message == WM_KEYDOWN && vk == VK_RETURN) {
-        activate_focused();
+    if (message == WM_KEYDOWN && vk == VK_F1) {
+        toggle_debug_overlay();
         return;
+    }
+    if (message == WM_KEYDOWN && vk == VK_F2) {
+        toggle_widget_inspector();
+        return;
+    }
+    if (message == WM_KEYDOWN && vk == VK_RETURN) {
+        // Let a focused TextBox own Enter (single-line commits, multiline Enter
+        // submits / Ctrl+Enter newlines). Only other focus targets use Enter to
+        // activate the focused widget/button.
+        if (focused_ && dynamic_cast<TextBox*>(focused_) != nullptr) {
+            // fall through to normal dispatch below, keeping Ctrl+Enter intact
+        } else {
+            activate_focused();
+            return;
+        }
     }
     if (message == WM_KEYDOWN && vk == VK_ESCAPE && context_menu_) {
         context_menu_->close();
         return;
     }
+
+    // Window accelerators: app chords fire before the focused widget sees the key.
+    // Editing chords (plain letters, Ctrl+Z/X/C/V/A, arrows, home/end, ...) are
+    // auto-suppressed while a text input is focused so typing intent is preserved;
+    // such chords fall through to the normal dispatch below.
+    if (message == WM_KEYDOWN && !repeat) {
+        if (fire_accelerator(vk, mods)) {
+            if (!suppress_accelerator_match_) return;  // accelerator ran; swallow key
+            // fall through: editing chord suppressed → let the widget receive it
+        }
+    }
+
     Widget* target = focused_ ? focused_ : hover_;
     if (!target) return;
     Event key;

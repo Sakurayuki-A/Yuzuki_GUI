@@ -29,6 +29,8 @@ public:
     void paint_impl(PaintContext& ctx) override;
     void on_event(Event& e) override;
 
+    String uia_role() const override { return "Toggle"; }
+
 private:
     bool checked_ = false;
     std::function<void(bool)> on_toggled_cb_;

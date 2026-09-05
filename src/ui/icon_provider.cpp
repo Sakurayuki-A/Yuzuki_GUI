@@ -60,12 +60,14 @@ IconProvider& phosphor_provider() {
     return phosphor;
 }
 
-void set_phosphor_font_file(const String& path) {
+IconProvider& set_phosphor_font_file(const String& path) {
     static_cast<PhosphorIconProvider&>(phosphor_provider()).set_font_file(path);
+    return phosphor_provider();
 }
 
-void set_provider(std::unique_ptr<IconProvider> provider) {
-    global_provider() = std::move(provider);
+IconProvider& set_provider(std::unique_ptr<IconProvider> p) {
+    global_provider() = std::move(p);
+    return provider();
 }
 
 IconProvider& provider() {

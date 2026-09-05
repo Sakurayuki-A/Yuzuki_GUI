@@ -178,13 +178,18 @@ public:
     Widget& set_rotate_deg(f32 degrees);
     f32 rotate_deg() const { return rotate_deg_.value(); }
     Widget& set_scale(f32 sx, f32 sy);
+    Point scale() const { return Point{scale_x_.value(), scale_y_.value()}; }
     f32 scale_x() const { return scale_x_.value(); }
     f32 scale_y() const { return scale_y_.value(); }
 
     // Pointer-state queries.
     //  - hovered(): Flag_Hovered is maintained centrally by the Window (update_hover
     //    sets/clears it on enter/leave), so ANY widget — including custom subclasses
-    //    that never touch events — gets a working hovered().
+    //    that never touch events — gets a working hovered(). Interactive controls
+    //    (Button, Slider, CheckBox, RadioButton, ToggleSwitch, ComboBox) ALSO handle
+    //    enter/leave in on_event: that redundancy is intentional and idempotent —
+    //    it keeps hovered() correct for synthetic events (unit tests, direct
+    //    on_event calls, host-driven paths) that bypass Window::update_hover.
     //  - pressed(): passive read of Flag_Pressed. The flag is NOT maintained by the
     //    base; interactive controls (Button, RadioButton, NavItem-style selectables)
     //    set it in MouseDown and clear it in MouseUp themselves.
@@ -218,6 +223,11 @@ virtual void perform_layout(const PaintContext* ctx = nullptr);
     virtual void on_event(Event& e);
     virtual Widget* hit_test(f32 x, f32 y);
     virtual bool is_window() const { return false; }
+
+    // Accessibility: UIA Name/Role for screen readers. Override in controls that
+    // have text (Button, Label, CheckBox, etc.) to expose readable names.
+    virtual String uia_name() const { return String(); }
+    virtual String uia_role() const { return String(); }
 
     void invalidate();
     void invalidate_area(const RectF& rect);

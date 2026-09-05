@@ -1,5 +1,6 @@
 #include <yuzuki/controls/list_view.hpp>
 #include <yuzuki/ui/window.hpp>
+#include <yuzuki/ui/clipboard.hpp>
 
 #include <windows.h>
 
@@ -10,10 +11,11 @@ namespace yzk {
 
 namespace {
 constexpr f32 kTextPadding = 10.0f;
-constexpr f32 kScrollbarWidth = 6.0f;
-constexpr f32 kScrollbarMargin = 4.0f;
-constexpr f32 kThumbMinHeight = 24.0f;
-constexpr f32 kWheelStep = 48.0f;
+// Geometry sourced from Theme (Phase 2.1) �?shared with ScrollView so both match.
+f32 scrollbar_width() { return Theme::get().scrollbar_width; }
+f32 scrollbar_margin() { return Theme::get().scrollbar_margin; }
+f32 thumb_min_height() { return Theme::get().scrollbar_thumb_min; }
+f32 wheel_step() { return Theme::get().wheel_step; }
 }
 
 ListView& ListView::set_items(const std::vector<String>& items) {
@@ -133,7 +135,7 @@ void ListView::paint_impl(PaintContext& ctx) {
     const i32 n = count();
     if (n == 0) return;
 
-    const f32 bar_w = show_scrollbar_ && max_scroll_ > 0.0f ? kScrollbarWidth + kScrollbarMargin : 0.0f;
+    const f32 bar_w = show_scrollbar_ && max_scroll_ > 0.0f ? scrollbar_width() + scrollbar_margin() : 0.0f;
     const f32 row_w = b.width() - bar_w;
 
     ctx.push_clip(b);
@@ -176,21 +178,21 @@ void ListView::paint_impl(PaintContext& ctx) {
     ctx.pop_clip();
 
     if (show_border_) {
-        ctx.draw_border(b, theme.border, 1.0f, 2.0f);
+        ctx.draw_border(b, theme.border, theme.border_width, 2.0f);
     }
 
     if (show_scrollbar_ && max_scroll_ > 0.0f) {
-        const f32 track_x = b.right - kScrollbarMargin - kScrollbarWidth;
-        const f32 track_top = b.top + kScrollbarMargin;
-        const f32 track_h = b.height() - kScrollbarMargin * 2.0f;
+        const f32 track_x = b.right - scrollbar_margin() - scrollbar_width();
+        const f32 track_top = b.top + scrollbar_margin();
+        const f32 track_h = b.height() - scrollbar_margin() * 2.0f;
         const f32 ratio = track_h / content_height();
-        const f32 thumb_h = std::max(ratio * track_h, kThumbMinHeight);
+        const f32 thumb_h = std::max(ratio * track_h, thumb_min_height());
         const f32 thumb_y = track_top + (track_h - thumb_h) * (max_scroll_ > 0.0f ? scroll_y_ / max_scroll_ : 0.0f);
 
-        ctx.fill_rounded(RectF::make(track_x, track_top, kScrollbarWidth, track_h),
-                         theme.surface_container_high, kScrollbarWidth / 2.0f);
-        ctx.fill_rounded(RectF::make(track_x, thumb_y, kScrollbarWidth, thumb_h),
-                         theme.border_hover, kScrollbarWidth / 2.0f);
+        ctx.fill_rounded(RectF::make(track_x, track_top, scrollbar_width(), track_h),
+                         theme.surface_container_high, scrollbar_width() / 2.0f);
+        ctx.fill_rounded(RectF::make(track_x, thumb_y, scrollbar_width(), thumb_h),
+                         theme.border_hover, scrollbar_width() / 2.0f);
     }
 }
 
@@ -209,6 +211,7 @@ void ListView::on_event(Event& e) {
 
         case EventType::KeyDown: {
             const u32 code = e.data.key.code;
+            const bool ctrl = (e.data.key.mods & KeyModifier_Control) != 0;
             if (code == VK_UP || code == VK_DOWN || code == VK_HOME || code == VK_END) {
                 e.consumed = true;
                 if (count() == 0) break;
@@ -228,13 +231,18 @@ void ListView::on_event(Event& e) {
             } else if (code == VK_RETURN && selected_ >= 0) {
                 e.consumed = true;
                 on_activate(selected_);
+            } else if (ctrl && code == 'C') {
+                if (selected_ >= 0 && selected_ < count()) {
+                    clipboard::set_text(text_at(selected_));
+                    e.consumed = true;
+                }
             }
             break;
         }
 
         case EventType::Wheel:
             if (max_scroll_ > 0.0f) {
-                scroll_by(-static_cast<f32>(e.data.mouse.wheel_delta) / 120.0f * kWheelStep);
+                scroll_by(-static_cast<f32>(e.data.mouse.wheel_delta) / 120.0f * wheel_step());
                 e.consumed = true;
             }
             break;
@@ -245,10 +253,10 @@ void ListView::on_event(Event& e) {
                 const f32 x = e.data.mouse.x - g.left;
                 const f32 y = e.data.mouse.y - g.top;
                 if (scrollbar_hit(x)) {
-                    const f32 track_top = kScrollbarMargin;
-                    const f32 track_h = bounds_.height() - kScrollbarMargin * 2.0f;
+                    const f32 track_top = scrollbar_margin();
+                    const f32 track_h = bounds_.height() - scrollbar_margin() * 2.0f;
                     const f32 ratio = track_h / content_height();
-                    const f32 thumb_h = std::max(ratio * track_h, kThumbMinHeight);
+                    const f32 thumb_h = std::max(ratio * track_h, thumb_min_height());
                     const f32 thumb_y = track_top + (track_h - thumb_h) * (max_scroll_ > 0.0f ? scroll_y_ / max_scroll_ : 0.0f);
                     if (y >= thumb_y && y <= thumb_y + thumb_h) {
                         dragging_thumb_ = true;
@@ -270,10 +278,10 @@ void ListView::on_event(Event& e) {
             if (dragging_thumb_ && max_scroll_ > 0.0f) {
                 const RectF g = global_bounds();
                 const f32 y = e.data.mouse.y - g.top;
-                const f32 track_top = kScrollbarMargin;
-                const f32 track_h = bounds_.height() - kScrollbarMargin * 2.0f;
+                const f32 track_top = scrollbar_margin();
+                const f32 track_h = bounds_.height() - scrollbar_margin() * 2.0f;
                 const f32 ratio = track_h / content_height();
-                const f32 thumb_h = std::max(ratio * track_h, kThumbMinHeight);
+                const f32 thumb_h = std::max(ratio * track_h, thumb_min_height());
                 const f32 range = track_h - thumb_h;
                 if (range > 0.0f) {
                     set_scroll_y((y - drag_grab_ - track_top) / range * max_scroll_);
@@ -326,7 +334,7 @@ i32 ListView::row_at_y(f32 y) const {
 
 bool ListView::scrollbar_hit(f32 x) const {
     if (!show_scrollbar_ || max_scroll_ <= 0.0f) return false;
-    const f32 bar_w = kScrollbarWidth + kScrollbarMargin;
+    const f32 bar_w = scrollbar_width() + scrollbar_margin();
     return x >= bounds_.width() - bar_w;
 }
 

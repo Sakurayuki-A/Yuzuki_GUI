@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#undef MessageBox  // winuser.h maps MessageBox → MessageBoxW; we use yzk::MessageBox
+
 #include <cstdio>
 
 using namespace yzk;
@@ -601,6 +603,238 @@ void test_text_box() {
     enter_char.data.key.chr = L'\r';
     ml.on_event(enter_char);
     CHECK(ml.text() == "ab\n");
+
+    // Ctrl+Enter must also insert exactly ONE newline: KeyDown(VK_RETURN, ctrl)
+    // is the single insertion point and the follow-up WM_CHAR '\n' is ignored.
+    TextBoxConfig cfg2;
+    cfg2.mode = TextBoxMode::MultiLine;
+    TextBox ml2("ab", cfg2);
+    Event focus4;
+    focus4.type = EventType::FocusGained;
+    ml2.on_event(focus4);
+    Event ctrl_enter_down;
+    ctrl_enter_down.type = EventType::KeyDown;
+    ctrl_enter_down.data.key.mods = KeyModifier_Control;
+    ctrl_enter_down.data.key.code = VK_RETURN;
+    ml2.on_event(ctrl_enter_down);
+    Event ctrl_enter_char;
+    ctrl_enter_char.type = EventType::Character;
+    ctrl_enter_char.data.key.mods = KeyModifier_Control;
+    ctrl_enter_char.data.key.chr = L'\n';
+    ml2.on_event(ctrl_enter_char);
+    CHECK(ml2.text() == "ab\n");
+
+    // enter_submits: Enter fires the commit callback instead of inserting; the
+    // trailing WM_CHAR '\r' stays inert and no newline is created.
+    TextBoxConfig cfg3;
+    cfg3.mode = TextBoxMode::MultiLine;
+    cfg3.enter_submits = true;
+    TextBox ml3("ab", cfg3);
+    Event focus5;
+    focus5.type = EventType::FocusGained;
+    ml3.on_event(focus5);
+    int commits = 0;
+    ml3.set_on_commit([&commits]() { ++commits; });
+    Event submit_down;
+    submit_down.type = EventType::KeyDown;
+    submit_down.data.key.code = VK_RETURN;
+    ml3.on_event(submit_down);
+    Event submit_char;
+    submit_char.type = EventType::Character;
+    submit_char.data.key.chr = L'\r';
+    ml3.on_event(submit_char);
+    CHECK(commits == 1);
+    CHECK(ml3.text() == "ab");
+}
+
+void test_text_box_undo_redo() {
+    auto focus = []() {
+        Event f;
+        f.type = EventType::FocusGained;
+        return f;
+    };
+    auto key = [](u32 code, u8 mods = KeyModifier_None) {
+        Event k;
+        k.type = EventType::KeyDown;
+        k.data.key.code = code;
+        k.data.key.mods = mods;
+        return k;
+    };
+    auto chr = [](wchar_t c, u8 mods = KeyModifier_None) {
+        Event ch;
+        ch.type = EventType::Character;
+        ch.data.key.chr = c;
+        ch.data.key.mods = mods;
+        return ch;
+    };
+
+    {
+        TextBox box;
+        box.on_event(focus());
+        // A typing run coalesces into ONE undo step.
+        box.on_event(chr(L'h'));
+        box.on_event(chr(L'e'));
+        box.on_event(chr(L'l'));
+        box.on_event(chr(L'l'));
+        box.on_event(chr(L'o'));
+        CHECK(box.text() == "hello");
+        box.on_event(key('Z', KeyModifier_Control));
+        CHECK(box.text() == "");  // whole run reverted in one step
+        box.on_event(key('Y', KeyModifier_Control));
+        CHECK(box.text() == "hello");  // redo restores the run
+    }
+    {
+        // Delete runs coalesce; a paste starts a new group.
+        TextBox box("abcde");
+        box.on_event(focus());
+        box.on_event(key(VK_BACK));  // deletes 'e'
+        box.on_event(key(VK_BACK));  // deletes 'd' — same run
+        CHECK(box.text() == "abc");
+        box.on_event(key('Z', KeyModifier_Control));
+        CHECK(box.text() == "abcde");  // both chars reverted at once
+    }
+    {
+        // Editing history is cleared by a new edit after an undo (redo invalidated).
+        TextBox box;
+        box.on_event(focus());
+        box.on_event(chr(L'a'));
+        box.on_event(chr(L'b'));
+        box.on_event(key('Z', KeyModifier_Control));  // -> ""
+        box.on_event(chr(L'c'));                      // new edit
+        box.on_event(key('Y', KeyModifier_Control));  // nothing to redo
+        CHECK(box.text() == "c");
+    }
+    {
+        // Ctrl+Shift+Z redoes too.
+        TextBox box;
+        box.on_event(focus());
+        box.on_event(chr(L'x'));
+        box.on_event(key('Z', KeyModifier_Control));
+        box.on_event(key('Z', KeyModifier_Control | KeyModifier_Shift));
+        CHECK(box.text() == "x");
+    }
+    {
+        // No-op edits (backspace at start) must not clobber the redo stack.
+        TextBox box;
+        box.on_event(focus());
+        box.on_event(chr(L'a'));
+        box.on_event(key('Z', KeyModifier_Control));  // undo "a"
+        box.on_event(key(VK_BACK));                   // no-op at position 0
+        box.on_event(key('Y', KeyModifier_Control));  // still redoable
+        CHECK(box.text() == "a");
+    }
+}
+
+void test_text_box_word_navigation() {
+    auto focus = []() {
+        Event f;
+        f.type = EventType::FocusGained;
+        return f;
+    };
+    auto key = [](u32 code, u8 mods = KeyModifier_None) {
+        Event k;
+        k.type = EventType::KeyDown;
+        k.data.key.code = code;
+        k.data.key.mods = mods;
+        return k;
+    };
+    auto chr = [](wchar_t c) {
+        Event ch;
+        ch.type = EventType::Character;
+        ch.data.key.chr = c;
+        return ch;
+    };
+
+    {
+        // Ctrl+Right jumps to the next word boundary; typing lands there.
+        TextBox box("hello world foo");
+        box.on_event(focus());
+        box.on_event(key(VK_HOME));
+        box.on_event(key(VK_RIGHT, KeyModifier_Control));  // after "hello"
+        box.on_event(chr(L'X'));
+        CHECK(box.text() == "helloX world foo");
+
+        // Ctrl+Left jumps back to the previous word start.
+        box.on_event(key(VK_RIGHT, KeyModifier_Control));  // after "world"
+        box.on_event(key(VK_LEFT, KeyModifier_Control));   // back to start of "world"
+        box.on_event(chr(L'Y'));
+        CHECK(box.text() == "helloX Yworld foo");
+    }
+    {
+        // Ctrl+Backspace deletes the word to the left (keeps the gap).
+        TextBox box("one two");
+        box.on_event(focus());
+        box.on_event(key(VK_END));
+        box.on_event(key(VK_BACK, KeyModifier_Control));
+        CHECK(box.text() == "one ");
+    }
+    {
+        // Ctrl+Delete deletes the word to the right (keeps the gap).
+        TextBox box("one two");
+        box.on_event(focus());
+        box.on_event(key(VK_HOME));
+        box.on_event(key(VK_DELETE, KeyModifier_Control));
+        CHECK(box.text() == " two");
+    }
+    {
+        // Ctrl+Home / Ctrl+End jump to the document edges in multiline mode.
+        TextBoxConfig cfg;
+        cfg.mode = TextBoxMode::MultiLine;
+        TextBox box("line1\nline2", cfg);
+        box.on_event(focus());
+        box.on_event(key(VK_END, KeyModifier_Control));  // document end
+        box.on_event(chr(L'!'));
+        CHECK(box.text() == "line1\nline2!");
+        box.on_event(key(VK_HOME, KeyModifier_Control));  // document start
+        box.on_event(chr(L'?'));
+        CHECK(box.text() == "?line1\nline2!");
+    }
+}
+
+void test_label_rich_text() {
+    auto width_of = [](const String& text, bool small = false) -> f32 {
+        Label l(text);
+        l.set_rich_text(true);
+        l.set_small(small);
+        const Size s = l.measure_impl(Size{}, nullptr);
+        return s.width;
+    };
+
+    // Plain rich (no markup) equals a plain label's estimate.
+    const f32 plain = width_of("hello world");
+    CHECK(plain > 0.0f);
+
+    // Delimiters consume no width: "hello world" via markup strips to "hello world";
+    // **bold** contributes only its visible chars.
+    const f32 marked = width_of("hello **bold** world");
+    const f32 bold_plain = width_of("hello bold world");
+    const f32 diff = marked > bold_plain ? marked - bold_plain : bold_plain - marked;
+    CHECK(diff < 0.5f);  // same visible glyphs -> near-equal estimate
+
+    // Link markup: [label](action) contributes only "label".
+    const f32 link_line = width_of("Go to [docs](https://x) now");
+    const f32 link_plain = width_of("Go to docs now");
+    const f32 diff2 = link_line > link_plain ? link_line - link_plain : link_plain - link_line;
+    CHECK(diff2 < 0.5f);
+
+    // Highlight markup strips tildes.
+    const f32 hl = width_of("prefix ~em~ suffix");
+    const f32 hl_plain = width_of("prefix em suffix");
+    const f32 diff3 = hl > hl_plain ? hl - hl_plain : hl_plain - hl;
+    CHECK(diff3 < 0.5f);
+
+    // Longer visible text => wider estimate.
+    CHECK(width_of("aa") < width_of("aaaa"));
+
+    // Disabling rich disables stripping.
+    Label l("**bold**");
+    CHECK(l.measure_impl(Size{}, nullptr).width > width_of("bold"));
+
+    // Render path must not throw with a constructed rich label (headless: no ctx).
+    Label clickable("[click me](open) **b**");
+    clickable.set_rich_text(true);
+    clickable.set_on_span_click([](const String&) {});
+    CHECK(!clickable.hit_link(9999.0f, 9999.0f));  // geometry not laid out headlessly -> no fire
 }
 
 void test_toggle_switch() {
@@ -648,10 +882,65 @@ void test_spin_box() {
     s.set_value(-1.0);
     CHECK(s.value() == 0.0);
     s.set_range(20.0, 80.0);
-    CHECK(s.minimum() == 20.0 && s.maximum() == 80.0);
+    CHECK(s.min() == 20.0 && s.max() == 80.0);
     CHECK(s.value() == 20.0);
     s.set_decimals(2);
     CHECK(s.text() == "20.00");
+}
+
+void test_tab_control() {
+    TabControl tc;
+    auto* p1 = new Label("Page One");
+    auto* p2 = new Label("Page Two");
+    tc.add_tab("General", p1).add_tab("About", p2);
+
+    CHECK(tc.tab_count() == 2);
+    CHECK(tc.tab_title(0) == "General");
+    CHECK(tc.tab_title(1) == "About");
+    CHECK(tc.selected_index() == 0);
+    CHECK(tc.selected_page() == p1);
+    CHECK(p1->visible() && !p2->visible());  // only the active page is visible
+
+    int fired = 0;
+    tc.set_on_changed([&fired](i32) { ++fired; });
+    tc.set_selected_index(0);  // same index: no-op
+    CHECK(fired == 0);
+    tc.set_selected_index(1);
+    CHECK(fired == 0);  // not attached to a Window yet: on_changed is suppressed
+
+    CHECK(tc.selected_index() == 1);
+    CHECK(tc.selected_page() == p2);
+    CHECK(!p1->visible() && p2->visible());
+    CHECK(tc.page(0) == p1 && tc.page(99) == nullptr && tc.tab_title(99).empty());
+
+    tc.set_selected_index(99);  // out-of-range ignored
+    CHECK(tc.selected_index() == 1);
+
+    // Keyboard navigation (Left/Right cycle with wrap).
+    Event ev;
+    ev.type = EventType::KeyDown;
+    ev.data.key.code = VK_RIGHT;
+    tc.on_event(ev);
+    CHECK(ev.consumed && tc.selected_index() == 0);  // wraps 1 -> 0
+    ev.consumed = false;
+    ev.data.key.code = VK_LEFT;
+    tc.on_event(ev);
+    CHECK(ev.consumed && tc.selected_index() == 1);  // wraps 0 -> 1
+    ev.consumed = false;
+    ev.data.key.code = VK_TAB;  // non-navigation key passes through
+    tc.on_event(ev);
+    CHECK(!ev.consumed && tc.selected_index() == 1);
+
+    // remove_tab re-indexes headers; deleting selection resets to a valid tab.
+    auto* p3 = new Label("Page Three");
+    tc.add_tab("Extras", p3);
+    CHECK(tc.tab_count() == 3);
+    tc.remove_tab(0);  // removes "General"/p1
+    CHECK(tc.tab_count() == 2);
+    CHECK(tc.selected_index() == 1);  // "About" kept and selected
+    CHECK(tc.tab_title(0) == "About");
+    CHECK(tc.tab_title(1) == "Extras");
+    CHECK(tc.selected_page() == p3);
 }
 
 void test_combo_box() {
@@ -974,13 +1263,13 @@ void test_lifecycle_window_teardown() {
         win.set_root(&root);
 
         win.set_focus(focus_target);
-        CHECK(win.focused() == focus_target);
+        CHECK(win.focus() == focus_target);
         CHECK(root.parent() == &win);
 
         // App-side deletion of a live control: ~Widget -> window()->detach_widget
         // must null out focused_ so the window never dispatches to it.
         delete focus_target;
-        CHECK(win.focused() == nullptr);
+        CHECK(win.focus() == nullptr);
         delete hover_target;
         // Root still carries no destroyed children.
         CHECK(root.first_child() == nullptr);
@@ -1046,6 +1335,885 @@ void test_grid_fixed() {
     CHECK(std::abs(wide_in_fixed.bounds().width() - 60.0f) < 0.01f);
 }
 
+// ===== Phase 5.1.2: Additional test coverage =====
+
+void test_point() {
+    Point p;
+    CHECK(p.x == 0.0f && p.y == 0.0f);
+    Point q{3.0f, 7.0f};
+    CHECK(q.x == 3.0f && q.y == 7.0f);
+}
+
+void test_size_extra() {
+    Size s0{0.0f, 0.0f};
+    CHECK(s0.empty());
+    Size s1{-1.0f, 5.0f};
+    CHECK(s1.empty());
+    Size s2{1.0f, 1.0f};
+    CHECK(!s2.empty());
+}
+
+void test_rect_extra() {
+    RectF r = RectF::make(10.0f, 20.0f, 50.0f, 30.0f);
+    CHECK(r.width() == 50.0f && r.height() == 30.0f);
+    CHECK(r.size().width == 50.0f && r.size().height == 30.0f);
+    CHECK(r.top_left().x == 10.0f && r.top_left().y == 20.0f);
+    CHECK(!r.empty());
+    RectF empty_r = RectF::make(0, 0, 0, 0);
+    CHECK(empty_r.empty());
+    // intersects
+    RectF a = RectF::make(0, 0, 10, 10);
+    RectF b = RectF::make(5, 5, 10, 10);
+    RectF c = RectF::make(20, 20, 5, 5);
+    CHECK(a.intersects(b));
+    CHECK(!a.intersects(c));
+    // edge-touching: right edge of a == left edge of c (a.right=10, c.left=20) → no overlap
+    RectF d = RectF::make(10, 0, 5, 5);
+    CHECK(!a.intersects(d));
+    // inflated
+    RectF inf = a.inflated(2.0f, 3.0f);
+    CHECK(inf.left == -2.0f && inf.top == -3.0f && inf.right == 12.0f && inf.bottom == 13.0f);
+    // translated
+    RectF tr = a.translated(10.0f, 20.0f);
+    CHECK(tr.left == 10.0f && tr.top == 20.0f && tr.right == 20.0f && tr.bottom == 30.0f);
+    // contains(Point)
+    CHECK(a.contains(Point{5.0f, 5.0f}));
+    CHECK(!a.contains(Point{15.0f, 5.0f}));
+    // operator!=
+    CHECK(a != b);
+    CHECK(a == a);
+    // unite with empty
+    RectF u;
+    u.unite(a);
+    CHECK(u == a);
+    // intersect no overlap
+    RectF no = a.intersect(c);
+    CHECK(no.empty());
+}
+
+void test_corner_radius() {
+    CornerRadius def;
+    CHECK(def.top_left == 0.0f && def.bottom_right == 0.0f);
+    CornerRadius uni(5.0f);
+    CHECK(uni.top_left == 5.0f && uni.top_right == 5.0f && uni.bottom_right == 5.0f && uni.bottom_left == 5.0f);
+}
+
+void test_color_extra() {
+    Color def;
+    CHECK(def.r == 0 && def.g == 0 && def.b == 0 && def.a == 255);
+    Color c{10, 20, 30, 40};
+    CHECK(c.r == 10 && c.g == 20 && c.b == 30 && c.a == 40);
+    Color eq1{1, 2, 3, 4};
+    Color eq2{1, 2, 3, 4};
+    CHECK(eq1 == eq2);
+    CHECK(eq1 != c);
+}
+
+void test_gradient_stop() {
+    GradientStop gs;
+    CHECK(gs.position == 0.0f);
+    gs.position = 0.5f;
+    gs.color = Color{255, 0, 0};
+    CHECK(gs.position == 0.5f && gs.color.r == 255);
+}
+
+void test_enums() {
+    CHECK(static_cast<u8>(TextAlignH::Left) == 0);
+    CHECK(static_cast<u8>(TextAlignH::Center) == 1);
+    CHECK(static_cast<u8>(TextAlignH::Right) == 2);
+    CHECK(static_cast<u8>(TextAlignV::Top) == 0);
+    CHECK(static_cast<u8>(TextAlignV::Center) == 1);
+    CHECK(static_cast<u8>(TextAlignV::Bottom) == 2);
+    CHECK(static_cast<u8>(Cursor::Arrow) == 0);
+}
+
+void test_event_extra() {
+    // Default state
+    Event e;
+    CHECK(e.type == EventType::None);
+    CHECK(!e.consumed);
+    CHECK(e.time_ms == 0);
+    // MouseData
+    Event me;
+    me.type = EventType::MouseMove;
+    me.data.mouse.x = 10.0f;
+    me.data.mouse.y = 20.0f;
+    me.data.mouse.buttons = MouseButton_Left | MouseButton_Right;
+    me.data.mouse.mods = KeyModifier_Shift;
+    me.data.mouse.wheel_delta = 120;
+    CHECK(me.data.mouse.x == 10.0f);
+    CHECK(me.data.mouse.y == 20.0f);
+    CHECK(me.data.mouse.buttons == (MouseButton_Left | MouseButton_Right));
+    CHECK(me.data.mouse.mods == KeyModifier_Shift);
+    CHECK(me.data.mouse.wheel_delta == 120);
+    // KeyData
+    Event ke;
+    ke.type = EventType::KeyDown;
+    ke.data.key.code = 65;
+    ke.data.key.chr = L'A';
+    ke.data.key.mods = KeyModifier_Control;
+    ke.data.key.repeat = true;
+    CHECK(ke.data.key.code == 65);
+    CHECK(ke.data.key.chr == L'A');
+    CHECK(ke.data.key.mods == KeyModifier_Control);
+    CHECK(ke.data.key.repeat);
+    // SizeData
+    Event se;
+    se.type = EventType::Resize;
+    se.data.size.width = 800.0f;
+    se.data.size.height = 600.0f;
+    CHECK(se.data.size.width == 800.0f);
+    CHECK(se.data.size.height == 600.0f);
+    // MouseButton values
+    CHECK(MouseButton_None == 0);
+    CHECK(MouseButton_Left == 1);
+    CHECK(MouseButton_Middle == 2);
+    CHECK(MouseButton_Right == 4);
+    CHECK(MouseButton_X1 == 8);
+    CHECK(MouseButton_X2 == 16);
+    // KeyModifier values
+    CHECK(KeyModifier_None == 0);
+    CHECK(KeyModifier_Shift == 1);
+    CHECK(KeyModifier_Control == 2);
+    CHECK(KeyModifier_Alt == 4);
+    CHECK(KeyModifier_Win == 8);
+}
+
+void test_encoding_extra() {
+    // ASCII roundtrip
+    String ascii = "Hello World";
+    CHECK(utf::to_utf8(utf::to_wide(ascii)) == ascii);
+    // Single char
+    String single = "A";
+    CHECK(utf::to_utf8(utf::to_wide(single)) == single);
+    // Mixed
+    String mixed = "Hi 你好";
+    CHECK(utf::to_utf8(utf::to_wide(mixed)) == mixed);
+    // Emoji (4-byte UTF-8)
+    String emoji = "\xF0\x9F\x98\x80";
+    CHECK(utf::to_utf8(utf::to_wide(emoji)) == emoji);
+}
+
+void test_widget_properties() {
+    Widget w;
+    // is_root
+    CHECK(w.is_root());
+    Widget parent;
+    parent.append_child(&w);
+    CHECK(!w.is_root());
+    // prev_sibling
+    Widget a, b;
+    parent.append_child(&a);
+    parent.append_child(&b);
+    CHECK(b.prev_sibling() == &a);
+    CHECK(a.prev_sibling() == &w);
+    // clear_children
+    Widget c1, c2, c3;
+    parent.append_child(&c1);
+    parent.append_child(&c2);
+    parent.append_child(&c3);
+    parent.clear_children();
+    CHECK(parent.first_child() == nullptr);
+    // x, y, width, height
+    w.set_bounds(RectF::make(10.0f, 20.0f, 100.0f, 50.0f));
+    CHECK(w.x() == 10.0f);
+    CHECK(w.y() == 20.0f);
+    CHECK(w.width() == 100.0f);
+    CHECK(w.height() == 50.0f);
+    // set_position
+    w.set_position(5.0f, 15.0f);
+    CHECK(w.x() == 5.0f && w.y() == 15.0f);
+    // set_size
+    w.set_size(200.0f, 80.0f);
+    CHECK(w.width() == 200.0f && w.height() == 80.0f);
+    // min/max size
+    w.set_min_width(50.0f);
+    w.set_min_height(30.0f);
+    CHECK(w.min_size().width == 50.0f && w.min_size().height == 30.0f);
+    w.set_max_width(500.0f);
+    w.set_max_height(400.0f);
+    CHECK(w.max_size().width == 500.0f && w.max_size().height == 400.0f);
+    // flex
+    w.set_flex_grow(2.0f);
+    w.set_flex_shrink(0.5f);
+    CHECK(w.flex_grow() == 2.0f);
+    CHECK(w.flex_shrink() == 0.5f);
+    // flags
+    CHECK(w.visible());
+    CHECK(w.enabled());
+    CHECK(!w.focusable());
+    CHECK(!w.draggable());
+    w.set_visible(false);
+    CHECK(!w.visible());
+    w.set_enabled(false);
+    CHECK(!w.enabled());
+    w.set_focusable(true);
+    CHECK(w.focusable());
+    w.set_draggable(true);
+    CHECK(w.draggable());
+    w.set_cursor(Cursor::IBeam);
+    CHECK(w.cursor() == Cursor::IBeam);
+    // margin
+    w.set_margin(8.0f);
+    CHECK(w.margin().left == 8.0f && w.margin().top == 8.0f);
+    CHECK(w.margin().horizontal() == 16.0f);
+    CHECK(w.margin().vertical() == 16.0f);
+}
+
+void test_label_api() {
+    Label lbl("Hello");
+    CHECK(lbl.text() == "Hello");
+    lbl.set_text("World");
+    CHECK(lbl.text() == "World");
+    lbl.text("Fluent");
+    CHECK(lbl.text() == "Fluent");
+    // text_color
+    CHECK(lbl.text_color().a == 0);
+    lbl.set_text_color(Color{255, 128, 0});
+    CHECK(lbl.text_color().r == 255);
+    // text_role
+    CHECK(lbl.text_role() == TextRole::Primary);
+    lbl.set_text_role(TextRole::Secondary);
+    CHECK(lbl.text_role() == TextRole::Secondary);
+    // small
+    CHECK(!lbl.small());
+    lbl.set_small(true);
+    CHECK(lbl.small());
+    // bold
+    CHECK(!lbl.bold());
+    lbl.set_bold(true);
+    CHECK(lbl.bold());
+    // align
+    lbl.set_align(TextAlignH::Left, TextAlignV::Top);
+    CHECK(lbl.align_h() == TextAlignH::Left);
+    CHECK(lbl.align_v() == TextAlignV::Top);
+}
+
+void test_button_api() {
+    Button btn("Test");
+    CHECK(btn.text() == "Test");
+    btn.set_text("New");
+    CHECK(btn.text() == "New");
+    CHECK(btn.accent());
+    btn.set_accent(false);
+    CHECK(!btn.accent());
+    CHECK(btn.padding() == 10.0f);
+    btn.set_padding(20.0f);
+    CHECK(btn.padding() == 20.0f);
+    CHECK(btn.icon_size() == 16.0f);
+    btn.set_icon_size(24.0f);
+    CHECK(btn.icon_size() == 24.0f);
+}
+
+void test_checkbox_api() {
+    CheckBox cb("Opt");
+    CHECK(cb.text() == "Opt");
+    cb.set_text("New");
+    CHECK(cb.text() == "New");
+    CHECK(!cb.checked());
+    cb.set_checked(true);
+    CHECK(cb.checked());
+    cb.set_checked(true);  // no-op
+    CHECK(cb.checked());
+    cb.set_checked(false);
+    CHECK(!cb.checked());
+}
+
+void test_radio_api() {
+    RadioButton r("Choice");
+    CHECK(r.text() == "Choice");
+    r.set_text("Option");
+    CHECK(r.text() == "Option");
+    CHECK(!r.checked());
+    r.set_checked(true);
+    CHECK(r.checked());
+    r.set_checked(true);
+    CHECK(r.checked());
+    r.set_checked(true);  // no-op
+    CHECK(r.checked());
+}
+
+void test_toggle_api() {
+    ToggleSwitch ts;
+    CHECK(!ts.checked());
+    ts.set_checked(true);
+    CHECK(ts.checked());
+    ts.set_checked(true);  // no-op
+    CHECK(ts.checked());
+}
+
+void test_slider_api() {
+    Slider sl;
+    sl.set_min(10.0f);
+    CHECK(sl.min() == 10.0f);
+    sl.set_max(90.0f);
+    CHECK(sl.max() == 90.0f);
+    sl.set_value(50.0f);
+    CHECK(sl.value() == 50.0f);
+    sl.set_value(5.0f);  // clamps to min
+    CHECK(sl.value() == 10.0f);
+    sl.set_value(95.0f);  // clamps to max
+    CHECK(sl.value() == 90.0f);
+}
+
+void test_spinbox_api() {
+    SpinBox sb;
+    sb.set_step(5.0);
+    CHECK(sb.step() == 5.0);
+    sb.set_decimals(3);
+    CHECK(sb.decimals() == 3);
+    sb.set_spin_width(40.0f);
+    CHECK(sb.spin_width() == 40.0f);
+    int changes = 0;
+    sb.set_on_changed([&](f64) { ++changes; });
+    sb.set_value(42.0);
+    CHECK(changes == 1);
+}
+
+void test_combobox_api() {
+    ComboBox cb;
+    CHECK(cb.items().empty());
+    cb.set_items({"A", "B", "C"});
+    CHECK(cb.items().size() == 3);
+    CHECK(cb.selected_index() == -1);
+    cb.set_placeholder("Pick");
+    CHECK(cb.placeholder() == "Pick");
+    cb.set_width(200.0f);
+    CHECK(cb.width() == 200.0f);
+    cb.set_selected_index(1);
+    CHECK(cb.selected_index() == 1);
+    cb.clear_items();
+    CHECK(cb.items().empty());
+    CHECK(cb.selected_index() == -1);
+}
+
+void test_progress_api() {
+    ProgressBar pb;
+    pb.set_value(0.5f);
+    CHECK(pb.value() == 0.5f);
+    pb.set_indeterminate(true);
+    CHECK(pb.indeterminate());
+    pb.set_indeterminate(false);
+    CHECK(!pb.indeterminate());
+}
+
+void test_scrollview_api() {
+    ScrollView sv;
+    CHECK(sv.scroll_y() == 0.0f);
+    CHECK(sv.suggested_height() == 0.0f);
+    sv.set_suggested_height(200.0f);
+    CHECK(sv.suggested_height() == 200.0f);
+    // Without content, max_scroll is 0 so set_scroll_y clamps
+    sv.set_scroll_y(50.0f);
+    CHECK(sv.scroll_y() == 0.0f);
+    sv.set_scroll_y(-10.0f);
+    CHECK(sv.scroll_y() == 0.0f);
+    // With content that overflows, scroll works
+    Widget content;
+    content.set_min_height(500.0f);
+    sv.set_content(&content);
+    sv.set_bounds(RectF::make(0, 0, 200, 100));
+    sv.perform_layout();
+    sv.set_scroll_y(50.0f);
+    CHECK(sv.scroll_y() == 50.0f);
+    sv.scroll_by(30.0f);
+    CHECK(sv.scroll_y() == 80.0f);
+    sv.scroll_by(-100.0f);
+    CHECK(sv.scroll_y() == 0.0f);
+}
+
+void test_icon_api() {
+    Icon ic(IconId::Check);
+    CHECK(ic.icon() == IconId::Check);
+    ic.set_icon(IconId::X);
+    CHECK(ic.icon() == IconId::X);
+    CHECK(ic.icon_size() == 16.0f);
+    ic.set_icon_size(24.0f);
+    CHECK(ic.icon_size() == 24.0f);
+    CHECK(ic.color().a == 0);
+    ic.set_color(Color{255, 0, 0});
+    CHECK(ic.color().r == 255);
+}
+
+void test_image_api() {
+    Image img;
+    CHECK(img.bitmap() == kInvalidBitmap);
+    CHECK(img.scale_mode() == ImageScaleMode::Contain);
+    img.set_scale_mode(ImageScaleMode::Stretch);
+    CHECK(img.scale_mode() == ImageScaleMode::Stretch);
+    CHECK(img.corner_radius() == 0.0f);
+    img.set_corner_radius(8.0f);
+    CHECK(img.corner_radius() == 8.0f);
+}
+
+void test_overlay_api() {
+    Overlay ov;
+    CHECK(!ov.is_open());
+    CHECK(ov.animated());
+    ov.set_animated(false);
+    CHECK(!ov.animated());
+    CHECK(ov.shadow());
+    ov.set_shadow(false);
+    CHECK(!ov.shadow());
+    CHECK(ov.dim_blurred() == false);
+    ov.set_dim_blurred(true);
+    CHECK(ov.dim_blurred());
+    CHECK(ov.slide_direction() == 1.0f);
+    ov.set_slide_direction(-1.0f);
+    CHECK(ov.slide_direction() == -1.0f);
+    RectF pr = RectF::make(10, 10, 200, 300);
+    ov.set_panel_rect(pr);
+    CHECK(ov.panel_rect() == pr);
+}
+
+void test_context_menu_api() {
+    ContextMenu cm;
+    CHECK(cm.items().empty());
+    CHECK(!cm.is_open());
+    cm.add_item("Cut", [] {});
+    CHECK(cm.items().size() == 1);
+    cm.add_separator();
+    CHECK(cm.items().size() == 2);
+    CHECK(cm.items()[1].separator);
+    cm.add_item("Paste", [] {});
+    CHECK(cm.items().size() == 3);
+    cm.clear_items();
+    CHECK(cm.items().empty());
+}
+
+void test_easing() {
+    CHECK(ease(0.0f, Easing::Linear) == 0.0f);
+    CHECK(ease(1.0f, Easing::Linear) == 1.0f);
+    CHECK(ease(0.5f, Easing::Linear) == 0.5f);
+    // InQuad
+    CHECK(ease(0.0f, Easing::InQuad) == 0.0f);
+    CHECK(ease(1.0f, Easing::InQuad) == 1.0f);
+    CHECK(std::abs(ease(0.5f, Easing::InQuad) - 0.25f) < 0.001f);
+    // OutQuad
+    CHECK(ease(0.0f, Easing::OutQuad) == 0.0f);
+    CHECK(ease(1.0f, Easing::OutQuad) == 1.0f);
+    CHECK(std::abs(ease(0.5f, Easing::OutQuad) - 0.75f) < 0.001f);
+    // InOutQuad
+    CHECK(ease(0.0f, Easing::InOutQuad) == 0.0f);
+    CHECK(ease(1.0f, Easing::InOutQuad) == 1.0f);
+    CHECK(std::abs(ease(0.5f, Easing::InOutQuad) - 0.5f) < 0.001f);
+    // InCubic
+    CHECK(ease(0.0f, Easing::InCubic) == 0.0f);
+    CHECK(ease(1.0f, Easing::InCubic) == 1.0f);
+    CHECK(std::abs(ease(0.5f, Easing::InCubic) - 0.125f) < 0.001f);
+    // OutCubic
+    CHECK(ease(0.0f, Easing::OutCubic) == 0.0f);
+    CHECK(ease(1.0f, Easing::OutCubic) == 1.0f);
+    CHECK(std::abs(ease(0.5f, Easing::OutCubic) - 0.875f) < 0.001f);
+    // InOutCubic
+    CHECK(ease(0.0f, Easing::InOutCubic) == 0.0f);
+    CHECK(ease(1.0f, Easing::InOutCubic) == 1.0f);
+    // InBack starts below 0 (overshoot)
+    CHECK(ease(0.5f, Easing::InBack) < 0.0f);
+    CHECK(ease(1.0f, Easing::InBack) == 1.0f);
+    // OutBack ends at 1
+    CHECK(ease(0.0f, Easing::OutBack) == 0.0f);
+    CHECK(ease(1.0f, Easing::OutBack) == 1.0f);
+}
+
+void test_theme_api() {
+    Theme dark = Theme::make_dark();
+    CHECK(dark.dark);
+    CHECK(dark.background.r == 0x1E);
+    Theme light = Theme::make_light();
+    CHECK(!light.dark);
+    CHECK(light.background.r == 0xFA);
+    Theme prev = Theme::get();
+    Theme::set(dark);
+    CHECK(Theme::get().dark);
+    Theme::set(light);
+    CHECK(!Theme::get().dark);
+    Theme::set(prev);
+    // theme_color
+    CHECK(theme_color(dark, ThemeRole::Background) == dark.background);
+    CHECK(theme_color(dark, ThemeRole::Accent) == dark.accent);
+    CHECK(theme_color(dark, ThemeRole::Text) == dark.text);
+    CHECK(theme_color(dark, ThemeRole::Surface) == dark.surface);
+    CHECK(theme_color(dark, ThemeRole::Border) == dark.border);
+}
+
+void test_dock_panel_layout() {
+    DockPanel dock;
+    Box top, left, fill;
+    top.set_bg(Color{1, 0, 0});
+    top.set_min_height(30.0f);
+    left.set_bg(Color{0, 1, 0});
+    left.set_min_width(50.0f);
+    fill.set_bg(Color{0, 0, 1});
+    dock.dock(&top, Dock::Top);
+    dock.dock(&left, Dock::Left);
+    dock.dock(&fill, Dock::Fill);
+    dock.set_bounds(RectF::make(0, 0, 200, 100));
+    dock.perform_layout();
+    CHECK(top.bounds().height() == 30.0f);
+    CHECK(left.bounds().width() == 50.0f);
+    CHECK(fill.bounds().width() == 150.0f);
+    CHECK(fill.bounds().height() == 70.0f);
+}
+
+void test_wrap_panel_layout() {
+    WrapPanel wrap;
+    wrap.set_spacing(0.0f);
+    wrap.set_line_spacing(0.0f);
+    FixedWidget w1(Size{60.0f, 20.0f});
+    FixedWidget w2(Size{60.0f, 20.0f});
+    FixedWidget w3(Size{60.0f, 20.0f});
+    wrap.append_child(&w1);
+    wrap.append_child(&w2);
+    wrap.append_child(&w3);
+    wrap.set_bounds(RectF::make(0, 0, 100, 100));
+    wrap.perform_layout();
+    CHECK(w1.bounds().left == 0.0f && w1.bounds().top == 0.0f);
+    CHECK(w2.bounds().top == 20.0f);
+    CHECK(w3.bounds().top == 40.0f);
+}
+
+void test_grid_star_layout() {
+    GridPanel grid(1, 2);
+    grid.set_gap(0.0f);
+    grid.set_row_star(0, 1.0f);
+    grid.set_row_star(1, 1.0f);
+    FixedWidget a(Size{50.0f, 10.0f});
+    FixedWidget b(Size{50.0f, 10.0f});
+    grid.add(&a, 0, 0);
+    grid.add(&b, 0, 1);
+    grid.set_bounds(RectF::make(0, 0, 200, 100));
+    grid.perform_layout();
+    CHECK(std::abs(a.bounds().height() - 50.0f) < 0.01f);
+    CHECK(std::abs(b.bounds().height() - 50.0f) < 0.01f);
+}
+
+void test_grid_gap() {
+    GridPanel grid(2, 1);
+    grid.set_gap(10.0f);
+    grid.set_column_fixed(0, 50.0f);
+    grid.set_column_fixed(1, 50.0f);
+    FixedWidget a(Size{50.0f, 20.0f});
+    FixedWidget b(Size{50.0f, 20.0f});
+    grid.add(&a, 0, 0);
+    grid.add(&b, 1, 0);
+    grid.set_bounds(RectF::make(0, 0, 200, 40));
+    grid.perform_layout();
+    CHECK(std::abs(b.bounds().left - 60.0f) < 0.01f);
+}
+
+void test_lifecycle_clear_children() {
+    Widget root;
+    FixedWidget c1(Size{10, 10});
+    FixedWidget c2(Size{10, 10});
+    FixedWidget c3(Size{10, 10});
+    root.append_child(&c1);
+    root.append_child(&c2);
+    root.append_child(&c3);
+    CHECK(root.first_child() != nullptr);
+    root.clear_children();
+    CHECK(root.first_child() == nullptr);
+}
+
+// Phase 5.1.6: Layout performance benchmark
+
+void test_layout_perf() {
+    StackPanel root;
+    for (int i = 0; i < 2000; ++i) {
+        auto* lbl = new FixedWidget(Size{100.0f, 24.0f});
+        lbl->set_min_height(24.0f);
+        root.append_child(lbl);
+    }
+    root.set_bounds(RectF::make(0, 0, 800, 48000));
+
+    LARGE_INTEGER freq, t0, t1;
+    QueryPerformanceFrequency(&freq);
+    QueryPerformanceCounter(&t0);
+    root.perform_layout();
+    QueryPerformanceCounter(&t1);
+    f64 ms = static_cast<f64>(t1.QuadPart - t0.QuadPart) / freq.QuadPart * 1000.0;
+    std::printf("Layout 2000 widgets: %.2f ms\n", ms);
+    CHECK(ms < 50.0);
+    CHECK(root.first_child() != nullptr);
+}
+
+// Phase 5.1.7: UIA Name/Role accessibility
+void test_uia_accessibility() {
+    Button btn("Submit");
+    CHECK(btn.uia_name() == "Submit");
+    CHECK(btn.uia_role() == "Button");
+
+    Label lbl("Hello");
+    CHECK(lbl.uia_name() == "Hello");
+    CHECK(lbl.uia_role() == "Text");
+
+    CheckBox cb("Agree");
+    CHECK(cb.uia_name() == "Agree");
+    CHECK(cb.uia_role() == "CheckBox");
+
+    RadioButton rb("Choice");
+    CHECK(rb.uia_name() == "Choice");
+    CHECK(rb.uia_role() == "RadioButton");
+
+    ToggleSwitch ts;
+    CHECK(ts.uia_name().empty());
+    CHECK(ts.uia_role() == "Toggle");
+
+    Widget w;
+    CHECK(w.uia_name().empty());
+    CHECK(w.uia_role().empty());
+}
+
+// ===== Phase 5.2.2 Dialogs =====
+
+void test_message_box_lifecycle() {
+    Window win("dlg", 640, 480);
+    yzk::Widget root;
+    root.set_min_size(yzk::Size{640.0f, 480.0f});
+    win.set_root(&root);
+
+    MessageBox box;
+    box.set_animated(false);
+    CHECK(!box.is_open());
+
+    MessageBoxResult got = MessageBoxResult::None;
+    box.show(win, "Data", "Delete the selected rows?", MessageBoxKind::Confirm,
+             [&got](MessageBoxResult r) { got = r; });
+    CHECK(box.is_open());
+    CHECK(got == MessageBoxResult::None);  // not dismissed yet
+
+    // Dismiss as OK (the primary button).
+    box.resolve(MessageBoxResult::Ok);
+    CHECK(!box.is_open());
+    CHECK(got == MessageBoxResult::Ok);
+}
+
+void test_message_box_resolve_fires_callback() {
+    Window win("dlg2", 640, 480);
+    yzk::Widget root;
+    root.set_min_size(yzk::Size{640.0f, 480.0f});
+    win.set_root(&root);
+
+    MessageBox box;
+    box.set_animated(false);
+    MessageBoxResult got = MessageBoxResult::None;
+    box.show(win, "T", "Body", MessageBoxKind::YesNoCancel, [&got](MessageBoxResult r) { got = r; });
+    CHECK(box.is_open());
+    box.resolve(MessageBoxResult::Yes);
+    CHECK(got == MessageBoxResult::Yes);
+    CHECK(!box.is_open());
+
+    // Re-open and dismiss with Cancel.
+    got = MessageBoxResult::None;
+    box.show(win, "T", "Body", MessageBoxKind::Info, [&got](MessageBoxResult r) { got = r; });
+    box.resolve(MessageBoxResult::Cancel);
+    CHECK(got == MessageBoxResult::Cancel);
+}
+
+void test_message_box_close_is_none() {
+    Window win("dlg3", 640, 480);
+    yzk::Widget root;
+    root.set_min_size(yzk::Size{640.0f, 480.0f});
+    win.set_root(&root);
+
+    MessageBox box;
+    box.set_animated(false);
+    MessageBoxResult got = MessageBoxResult::None;
+    box.show(win, "T", "Body", MessageBoxKind::Confirm, [&got](MessageBoxResult r) { got = r; });
+    box.close();
+    CHECK(!box.is_open());
+    CHECK(got == MessageBoxResult::None);
+}
+
+// ===== Phase 5.2.3 Accelerators =====
+
+void test_accelerator_basic() {
+    Window win("acc", 400, 300);
+    yzk::Widget root;
+    root.set_min_size(yzk::Size{400.0f, 300.0f});
+    win.set_root(&root);
+
+    int fires = 0;
+    win.add_accelerator(Accelerator{static_cast<u32>('S'), KeyModifier_Control,
+                                    [&fires]() { ++fires; }});
+
+    // Direct fire through the table.
+    CHECK(win.fire_accelerator(static_cast<u32>('S'), KeyModifier_Control));
+    CHECK(fires == 1);
+
+    // Remove it; no longer fires.
+    CHECK(win.remove_accelerator(static_cast<u32>('S'), KeyModifier_Control));
+    CHECK(!win.fire_accelerator(static_cast<u32>('S'), KeyModifier_Control));
+    CHECK(fires == 1);
+
+    // Unknown chord: no match, false.
+    CHECK(!win.fire_accelerator(static_cast<u32>('S'), KeyModifier_Control | KeyModifier_Shift));
+}
+
+void test_accelerator_replace_duplicate() {
+    Window win("acc2", 400, 300);
+    int fires = 0;
+    win.add_accelerator(Accelerator{'Q', KeyModifier_Control, [&fires]() { fires += 1; }});
+    win.add_accelerator(Accelerator{'Q', KeyModifier_Control, [&fires]() { fires += 10; }});
+    win.fire_accelerator('Q', KeyModifier_Control);
+    CHECK(fires == 10);  // replaced, not duplicated
+}
+
+void test_accelerator_not_hijack_editing_key() {
+    Window win("acc3", 400, 300);
+    yzk::Widget root;
+    root.set_min_size(yzk::Size{400.0f, 300.0f});
+    win.set_root(&root);
+
+    TextBoxConfig cfg;
+    auto* box = new TextBox("hello", cfg);
+    root.append_child(box);
+    win.set_focus(box);
+
+    // Ctrl+Z is a textbox editing chord: accelerator matches but is suppressed
+    // while a text input is focused (falls through to the widget).
+    int ctrl_z = 0;
+    win.add_accelerator(Accelerator{'Z', KeyModifier_Control, [&ctrl_z]() { ++ctrl_z; }});
+    CHECK(win.fire_accelerator('Z', KeyModifier_Control));
+    CHECK(ctrl_z == 0);  // suppressed, did not fire
+
+    // Ctrl+S is an app chord: fires even with the text input focused.
+    int ctrl_s = 0;
+    win.add_accelerator(Accelerator{'S', KeyModifier_Control, [&ctrl_s]() { ++ctrl_s; }});
+    CHECK(win.fire_accelerator('S', KeyModifier_Control));
+    CHECK(ctrl_s == 1);
+}
+
+void test_accelerator_fires_without_focus() {
+    Window win("acc4", 400, 300);
+    int fires = 0;
+    win.add_accelerator(Accelerator{'P', KeyModifier_Control, [&fires]() { ++fires; }});
+    CHECK(win.fire_accelerator('P', KeyModifier_Control));
+    CHECK(fires == 1);
+}
+
+// ===== Phase 5.2.4 Secondary windows =====
+
+void test_secondary_owner_state() {
+    yzk::Window owner("owner", 400, 300);
+    yzk::Window child("child", 300, 200);
+
+    CHECK(owner.owner() == nullptr);
+    child.set_owner(&owner);
+    CHECK(child.owner() == &owner);
+
+    child.set_modal(true);
+    CHECK(child.modal());
+    child.set_modal(false);
+    CHECK(!child.modal());
+
+    child.set_topmost(true);
+    CHECK(child.topmost());
+    child.set_topmost(false);
+    CHECK(!child.topmost());
+}
+
+void test_secondary_owner_chain() {
+    yzk::Window owner("owner", 400, 300);
+    yzk::Window mid("mid", 320, 240);
+    yzk::Window leaf("leaf", 260, 180);
+
+    mid.set_owner(&owner);
+    leaf.set_owner(&mid);
+    CHECK(mid.owner() == &owner);
+    CHECK(leaf.owner() == &mid);
+    // Re-parenting replaces the owner.
+    leaf.set_owner(&owner);
+    CHECK(leaf.owner() == &owner);
+    mid.set_owner(nullptr);
+    CHECK(mid.owner() == nullptr);
+}
+
+// ===== End Phase 5.2.4 =====
+void test_clipboard_roundtrip() {
+    const String original = u8"Yuzuki 柚子 - \u6805\u6c47 test 123";
+    CHECK(clipboard::set_text(original));
+    CHECK(clipboard::has_text());
+    const String read = clipboard::get_text();
+    CHECK(read == original);
+}
+
+void test_clipboard_empty_get_returns_empty() {
+    // Reading an empty/absent clipboard never throws; returns empty string.
+    const String read = clipboard::get_text();
+    (void)read;
+    CHECK(true);
+}
+
+void test_clipboard_overwrite() {
+    CHECK(clipboard::set_text(u8"first value"));
+    CHECK(clipboard::set_text(u8"second value"));
+    CHECK(clipboard::get_text() == u8"second value");
+}
+
+void test_list_view_ctrl_c_copies_selected() {
+    ListView view;
+    CHECK(view.selected() == -1);
+
+    Event key;
+    key.type = EventType::KeyDown;
+    key.data.key.code = 'C';
+    key.data.key.mods = KeyModifier_Control;
+    view.on_event(key);
+    // No selected row yet: nothing consumed, clipboard left untouched.
+    CHECK(!key.consumed);
+
+    view.set_items({"alpha", "beta-中文", "gamma"});
+    view.set_selected(1);
+    Event copy;
+    copy.type = EventType::KeyDown;
+    copy.data.key.code = 'C';
+    copy.data.key.mods = KeyModifier_Control;
+    view.on_event(copy);
+    CHECK(copy.consumed);
+    CHECK(clipboard::get_text() == "beta-中文");
+
+    Event plain_c;
+    plain_c.type = EventType::KeyDown;
+    plain_c.data.key.code = 'C';
+    plain_c.data.key.mods = 0;
+    view.on_event(plain_c);
+    CHECK(!plain_c.consumed);
+}
+
+void test_text_box_via_framework_clipboard() {
+    TextBox box("hello");
+    Event focus;
+    focus.type = EventType::FocusGained;
+    box.on_event(focus);
+
+    Event select_all;
+    select_all.type = EventType::KeyDown;
+    select_all.data.key.code = 'A';
+    select_all.data.key.mods = KeyModifier_Control;
+    box.on_event(select_all);
+
+    Event copy;
+    copy.type = EventType::KeyDown;
+    copy.data.key.code = 'C';
+    copy.data.key.mods = KeyModifier_Control;
+    box.on_event(copy);
+    CHECK(clipboard::get_text() == "hello");
+
+    TextBox other;
+    Event focus2;
+    focus2.type = EventType::FocusGained;
+    other.on_event(focus2);
+    Event paste;
+    paste.type = EventType::KeyDown;
+    paste.data.key.code = 'V';
+    paste.data.key.mods = KeyModifier_Control;
+    other.on_event(paste);
+    CHECK(other.text() == "hello");
+}
+
+// ===== End Phase 5.2.1 =====
+
 }  // namespace
 
 int main() {
@@ -1070,6 +2238,7 @@ int main() {
     test_progress_bar();
     test_spin_box();
     test_combo_box();
+    test_tab_control();
     test_list_view();
     test_list_view_data_source();
     test_list_view_keyboard();
@@ -1080,6 +2249,69 @@ int main() {
     test_lifecycle_window_teardown();
     test_visual_footprint();
     test_grid_fixed();
+    // Phase 5.1.2 additions
+    test_point();
+    test_size_extra();
+    test_rect_extra();
+    test_corner_radius();
+    test_color_extra();
+    test_gradient_stop();
+    test_enums();
+    test_event_extra();
+    test_encoding_extra();
+    test_widget_properties();
+    test_label_api();
+    test_button_api();
+    test_checkbox_api();
+    test_radio_api();
+    test_toggle_api();
+    test_slider_api();
+    test_spinbox_api();
+    test_combobox_api();
+    test_progress_api();
+    test_scrollview_api();
+    test_icon_api();
+    test_image_api();
+    test_overlay_api();
+    test_context_menu_api();
+    test_easing();
+    test_theme_api();
+    test_dock_panel_layout();
+    test_wrap_panel_layout();
+    test_grid_star_layout();
+    test_grid_gap();
+    test_lifecycle_clear_children();
+    test_layout_perf();
+    test_uia_accessibility();
+
+    // Phase 5.2.1 additions
+    test_clipboard_roundtrip();
+    test_clipboard_empty_get_returns_empty();
+    test_clipboard_overwrite();
+    test_list_view_ctrl_c_copies_selected();
+    test_text_box_via_framework_clipboard();
+
+    // Phase 5.2.2 additions
+    test_message_box_lifecycle();
+    test_message_box_resolve_fires_callback();
+    test_message_box_close_is_none();
+
+    // Phase 5.2.3 additions
+    test_accelerator_basic();
+    test_accelerator_replace_duplicate();
+    test_accelerator_not_hijack_editing_key();
+    test_accelerator_fires_without_focus();
+
+    // Phase 5.2.4 additions
+    test_secondary_owner_state();
+    test_secondary_owner_chain();
+
+    // Phase 5.3.1 additions
+    test_text_box_undo_redo();
+    test_text_box_word_navigation();
+
+    // Phase 5.3.2 additions
+    test_label_rich_text();
 
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

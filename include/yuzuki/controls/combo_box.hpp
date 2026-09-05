@@ -40,15 +40,15 @@ public:
     f32 width() const { return width_; }
 
     // Convenience callback registration; the virtual hook below is invoked with it.
-    ComboBox& set_on_change(std::function<void(i32)> cb) {
-        on_change_cb_ = std::move(cb);
+    ComboBox& set_on_changed(std::function<void(i32)> cb) {
+        on_changed_cb_ = std::move(cb);
         return *this;
     }
-    // Fluent short name (Lego-style); same as set_on_change.
-    ComboBox& on_change(std::function<void(i32)> cb) { return set_on_change(std::move(cb)); }
+    // Fluent short name (Lego-style); same as set_on_changed.
+    ComboBox& on_changed(std::function<void(i32)> cb) { return set_on_changed(std::move(cb)); }
 
-    virtual void on_change(i32 index) {
-        if (on_change_cb_) on_change_cb_(index);
+    virtual void on_changed(i32 index) {
+        if (on_changed_cb_) on_changed_cb_(index);
     }
 
     Size measure_impl(Size available, const PaintContext* ctx) override;
@@ -63,7 +63,7 @@ private:
     f32 width_ = 160.0f;
     String placeholder_ = "Select...";
     Popup* popup_ = nullptr;
-    std::function<void(i32)> on_change_cb_;
+    std::function<void(i32)> on_changed_cb_;
 };
 
 }  // namespace yzk

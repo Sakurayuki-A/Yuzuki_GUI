@@ -25,8 +25,15 @@ public:
     D2DBackend() = default;
     ~D2DBackend() override;
 
+    // Pixel capture: call set_capture_before_frame() before begin_frame(),
+    // then capture_pixels() after end_frame() to read back BGRA pixels.
+    void set_capture_before_frame(bool enabled) override { capture_frame_ = enabled; }
+    bool capture_pixels(std::vector<u8>& bgra_out, u32& width, u32& height) override;
+    void release_capture() override;
+
     bool create_target(void* native_window, u32 width_px, u32 height_px, u32 dpi) override;
     void destroy_target() override;
+    bool recreate_after_loss() override;
     bool resize(u32 width_px, u32 height_px) override;
     void set_dpi(u32 dpi) override;
     u32 dpi() const override { return dpi_; }
@@ -52,13 +59,15 @@ public:
     void unload_bitmap(BitmapId id) override;
     Size bitmap_size(BitmapId id) const override;
     void draw_bitmap(BitmapId id, const RectF& rect, f32 radius) override;
-    Size measure_text(FontId font, const String& text, f32 max_width) override;
+    Size measure_text(FontId font, const String& text, f32 max_width, bool wrap = true) override;
     i32 hit_test_text(FontId font, const String& text, f32 width, f32 x, f32 y) override;
     Point caret_position(FontId font, const String& text, f32 width, i32 pos) override;
     std::vector<TextSelectionRect> text_selection_rects(FontId font, const String& text, f32 width,
                                                         f32 height, i32 begin, i32 end) override;
-    void draw_text(FontId font, const String& text, const RectF& rect,
-                   const Color& color, TextAlignH align_h, TextAlignV align_v) override;
+    // wrap=false (default): single-line (DWRITE_WORD_WRAPPING_NO_WRAP) — the widget
+    // labels/buttons/list rows pass no wrap. wrap=true: multi-line (TextBox).
+    void draw_text(FontId font, const String& text, const RectF& rect, const Color& color,
+                   TextAlignH align_h, TextAlignV align_v, bool wrap) override;
 
     void fill_rect(const RectF& rect, const Color& color) override;
     void fill_rounded(const RectF& rect, const Color& color, f32 radius) override;
@@ -92,7 +101,10 @@ private:
     struct CachedShadow;
     bool render_shadow_bitmap(f32 width, f32 height, f32 radius, f32 blur);
     CachedShadow* find_shadow(f32 width, f32 height, f32 radius, f32 blur);
-    bool get_layout(FontId font, const std::wstring& wide, f32 width, f32 height,
+    // wrap = true: DWRITE_WORD_WRAPPING_WRAP (multi-line controls); false (default):
+    // DWRITE_WORD_WRAPPING_NO_WRAP (single-line controls — a line box is one font row,
+    // long text overflows horizontally instead of folding into a second row).
+    bool get_layout(FontId font, const std::wstring& wide, f32 width, f32 height, bool wrap,
                     Microsoft::WRL::ComPtr<IDWriteTextLayout>* out_layout,
                     DWRITE_TEXT_METRICS* out_metrics);
     // Hit-testing / caret / selection layout: wraps at the REAL content height (read
@@ -144,11 +156,13 @@ private:
         std::wstring text;
         f32 width = 0.0f;
         f32 height = 0.0f;
+        bool wrap = false;
 
         bool operator<(const TextLayoutKey& o) const {
             if (font != o.font) return font < o.font;
             if (width != o.width) return width < o.width;
             if (height != o.height) return height < o.height;
+            if (wrap != o.wrap) return wrap < o.wrap;
             return text < o.text;
         }
     };
@@ -274,6 +288,10 @@ private:
     f32 rounded_geometry_radius_ = 0.0f;
     Microsoft::WRL::ComPtr<ID2D1Effect> sweep_effect_;
     SweepGradientEffect* sweep_effect_impl_ = nullptr;
+
+    // Pixel capture (visual regression testing)
+    bool capture_frame_ = false;
+    Microsoft::WRL::ComPtr<ID3D11Texture2D> capture_staging_;
 };
 
 }  // namespace yzk

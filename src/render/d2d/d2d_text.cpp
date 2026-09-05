@@ -1,6 +1,7 @@
 // D2D backend: font registration / text layout cache / measuring / hit testing / drawing.
 // Layouts are cached with LRU eviction (2048 entries); a cache hit reuses the same IDWriteTextLayout.
 #include "d2d_backend.hpp"
+#include "d2d_internal.hpp"
 
 #include <dwrite_3.h>
 
@@ -131,11 +132,11 @@ FontId D2DBackend::create_font(const FontSpec& spec) {
 }
 
 bool D2DBackend::get_layout(FontId font, const std::wstring& wide, f32 width, f32 height,
-                            Microsoft::WRL::ComPtr<IDWriteTextLayout>* out_layout,
+                            bool wrap, Microsoft::WRL::ComPtr<IDWriteTextLayout>* out_layout,
                             DWRITE_TEXT_METRICS* out_metrics) {
     if (font == kInvalidFont || font > fonts_.size() || wide.empty()) return false;
 
-    const TextLayoutKey key{font, wide, width, height};
+    const TextLayoutKey key{font, wide, width, height, wrap};
     auto it = layout_cache_.find(key);
     if (it != layout_cache_.end()) {
         // Cache hit: move to MRU position (list head).
@@ -151,8 +152,14 @@ bool D2DBackend::get_layout(FontId font, const std::wstring& wide, f32 width, f3
         &layout);
     if (FAILED(hr)) return false;
 
-    DWRITE_TEXT_METRICS metrics{};
-    hr = layout->GetMetrics(&metrics);
+    // Explicit wrap contract: single-line controls (default, NO_WRAP) must never fold
+    // a long label into a second row that escapes its box; only multi-line controls
+    // request wrapping. Without this, DWrite's default (WRAP) silently reflows.
+    hr = layout->SetWordWrapping(wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+    if (FAILED(hr)) return false;
+
+    DWRITE_TEXT_METRICS layout_metrics{};
+    hr = layout->GetMetrics(&layout_metrics);
     if (FAILED(hr)) return false;
 
     // LRU eviction: remove the least-recently-used (list tail) entry when over capacity.
@@ -163,25 +170,29 @@ bool D2DBackend::get_layout(FontId font, const std::wstring& wide, f32 width, f3
         layout_cache_.erase(victim);
     }
 
-    auto entry_it = layout_cache_.try_emplace(key).first;
-    entry_it->second.layout = layout;
-    entry_it->second.metrics = metrics;
+    TextLayoutEntry entry;
+    entry.layout = layout;
+    entry.metrics = layout_metrics;
+    auto entry_it = layout_cache_.try_emplace(key, std::move(entry)).first;
     lru_order_.push_front(key);
     entry_it->second.lru_it = lru_order_.begin();
 
     *out_layout = layout;
-    *out_metrics = metrics;
+    *out_metrics = layout_metrics;
     return true;
 }
 
-Size D2DBackend::measure_text(FontId font, const String& text, f32 max_width) {
+Size D2DBackend::measure_text(FontId font, const String& text, f32 max_width, bool wrap) {
     if (font == kInvalidFont || text.empty()) return Size{};
     if (max_width <= 0.0f) max_width = 1e7f;
 
     const WString wide = utf::to_wide(text);
     Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
     DWRITE_TEXT_METRICS metrics{};
-    if (!get_layout(font, wide, max_width, 1e7f, &layout, &metrics)) return Size{};
+    // Measuring must share the caller's wrap contract with draw_text: wrap=true for
+    // multi-line (TextBox), wrap=false for single-line controls (Label) so the box
+    // matches what paint will draw.
+    if (!get_layout(font, wide, max_width, 1e7f, wrap, &layout, &metrics)) return Size{};
 
     return Size{metrics.width, metrics.height};
 }
@@ -189,7 +200,8 @@ Size D2DBackend::measure_text(FontId font, const String& text, f32 max_width) {
 bool D2DBackend::get_hit_layout(FontId font, const std::wstring& wide, f32 width,
                                 Microsoft::WRL::ComPtr<IDWriteTextLayout>* out_layout) {
     DWRITE_TEXT_METRICS metrics{};
-    if (!get_layout(font, wide, width, 1e7f, out_layout, &metrics)) return false;
+    // Hit-layout matches the drawn multi-line content: wrap at the same width.
+    if (!get_layout(font, wide, width, 1e7f, true, out_layout, &metrics)) return false;
     if (metrics.height <= 0.0f || metrics.height >= 1e6f) return true;
     // Re-create at the real wrapped height so hit-test geometry matches the drawn text.
     // Not cached: interaction-time only, and the huge-height layout stays shared.
@@ -294,14 +306,20 @@ std::vector<TextSelectionRect> D2DBackend::text_selection_rects(FontId font, con
 }
 
 void D2DBackend::draw_text(FontId font, const String& text, const RectF& rect,
-                           const Color& color, TextAlignH align_h, TextAlignV align_v) {
+                           const Color& color, TextAlignH align_h, TextAlignV align_v,
+                           bool wrap) {
     if (font == kInvalidFont || font > fonts_.size() || text.empty()) return;
     if (!ensure_brush(color)) return;
 
     const WString wide = utf::to_wide(text);
     Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
     DWRITE_TEXT_METRICS metrics{};
-    if (!get_layout(font, wide, rect.width(), rect.height(), &layout, &metrics)) return;
+    // Layout at unbounded height (1e7): DirectWrite then lays out the FULL content
+    // (all wrapped rows / the one line) and reports its true box. A rect-tall box
+    // would truncate rows beyond it and make widths inconsistent with measure().
+    // Truncating multi-line text to the widget is the WIDGET's job (its own clip);
+    // the backend must hand back honest geometry.
+    if (!get_layout(font, wide, rect.width(), 1e7f, wrap, &layout, &metrics)) return;
 
     D2D1_POINT_2F origin{};
     switch (align_h) {
@@ -310,41 +328,57 @@ void D2DBackend::draw_text(FontId font, const String& text, const RectF& rect,
         case TextAlignH::Right: origin.x = rect.right - metrics.width; break;
     }
 
-    // Vertical alignment is BASELINE-driven and uses the font's em box (ascent +
-    // descent), NOT layout metrics.height — metrics.height includes lineGap, so a
-    // line-box-based "center" would offset the glyph ink away from the rect center.
-    // The baseline is then pixel-snapped (see below), so ink rows align on whole
-    // device pixels across widgets.
-    bool has_metrics = font_vmetrics_.size() >= font && font_vmetrics_[font - 1].valid;
-    const f32 ascent = has_metrics ? font_vmetrics_[font - 1].ascent : metrics.height;
-    const f32 descent = has_metrics ? font_vmetrics_[font - 1].descent : 0.0f;
+    // Vertical geometry comes from the LAYOUT's own metrics — one source of truth
+    // from the resolved font (incl. fallback faces), no self-parsed ascent drift.
+    //   metrics.height = the whole content box (1 line or all wrapped rows);
+    //   first line.baseline = design ascent of the top row (for pixel snapping).
+    // The block is placed in rect by metrics.height; the first line's baseline is
+    // recovered for a crisp, stable pixel anchor.
+    DWRITE_LINE_METRICS line{};
+    UINT32 line_count = 0;
+    bool have_line = SUCCEEDED(layout->GetLineMetrics(&line, 1, &line_count)) && line_count >= 1;
+    const f32 first_baseline = have_line ? line.baseline : 0.0f;
 
-    f32 baseline = rect.top;
+    f32 block_top = rect.top;
     switch (align_v) {
-        case TextAlignV::Top: baseline = rect.top + ascent; break;
-        case TextAlignV::Center:
-            baseline = rect.top + (rect.height() - (ascent + descent)) / 2.0f + ascent;
+        case TextAlignV::Top:
+            block_top = rect.top;
             break;
-        case TextAlignV::Bottom: baseline = rect.bottom - descent; break;
+        case TextAlignV::Center:
+            block_top = rect.top + (rect.height() - metrics.height) / 2.0f;
+            break;
+        case TextAlignV::Bottom:
+            block_top = rect.bottom - metrics.height;
+            break;
     }
 
-    // Pixel-snap the BASELINE (Y) to whole device pixels: keeps rows crisp and
+    // Pixel-snap the first BASELINE (Y) to whole device pixels: keeps rows crisp and
     // baselines stable across frames. Horizontal stays subpixel on purpose — forcing
     // stems onto a single pixel column leaves them two-tone (covered / empty), which
     // reads as harsh jaggy strokes for dark-on-light text under grayscale AA; letting
     // X stay fractional spreads each stem across two columns for smooth edges.
     // Skipped while a visual transform is active: the world transform maps the point
     // elsewhere and snapping there would fight animations (rotate/scale sampling).
+    f32 baseline = block_top + first_baseline;
     if (visual_transform_stack_.empty()) {
         const f32 scale = dpi_ / 96.0f;
         baseline = std::round(baseline * scale) / scale;
     }
 
-    // DrawTextLayout's origin is the layout box top; the baseline sits `ascent`
-    // below it (font design ascent in DIPs). Recover the box top from the baseline.
-    origin.y = baseline - ascent;
+    // DrawTextLayout's origin is the layout box top; the first line's baseline sits
+    // `line.baseline` below it (the resolved font's design ascent). Recover the box
+    // top from the snapped baseline and anchor the FIRST line there.
+    origin.y = baseline - first_baseline;
 
+    // Clip as the LAST safety boundary behind correct geometry: glyph ink normally
+    // lands inside rect because layout height/glyph box and the widget's box are the
+    // same font metrics. When a widget genuinely mis-sizes (rect < line box), the
+    // clip absorbs it instead of letting ink bleed outside. PER_PRIMITIVE AA keeps
+    // edge pixels blended rather than hard-cut.
+    const D2D1_RECT_F clip = to_d2d(rect);
+    context_->PushAxisAlignedClip(&clip, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     context_->DrawTextLayout(origin, layout.Get(), brush_.Get());
+    context_->PopAxisAlignedClip();
 }
 
 }  // namespace yzk

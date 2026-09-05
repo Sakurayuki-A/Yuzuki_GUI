@@ -36,7 +36,7 @@ SpinBox& SpinBox::set_value(f64 value) {
     if (value_ == value) return *this;
     value_ = value;
     sync_text();
-    on_value_changed(value_);
+    on_changed(value_);
     return *this;
 }
 
@@ -75,8 +75,8 @@ void SpinBox::sync_text() {
 
 Size SpinBox::measure_impl(Size available, const PaintContext* ctx) {
     (void)available;
-    (void)ctx;
-    return Size{160.0f, 32.0f};
+    const f32 height = ctx ? ctx->theme().control_height : 32.0f;
+    return Size{160.0f, height};
 }
 
 void SpinBox::paint_impl(PaintContext& ctx) {

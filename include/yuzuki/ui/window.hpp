@@ -1,6 +1,7 @@
 #pragma once
 #include <yuzuki/ui/widget.hpp>
 #include <yuzuki/ui/animation.hpp>
+#include <yuzuki/ui/accelerator.hpp>
 #include <yuzuki/render/backend.hpp>
 #include <yuzuki/controls/context_menu.hpp>
 
@@ -18,6 +19,9 @@
 #endif
 
 namespace yzk {
+
+class DebugOverlay;
+class WidgetInspector;
 
 class Window : public Widget {
 public:
@@ -41,16 +45,22 @@ public:
     RenderBackend& backend() { return *backend_; }
     const RenderBackend& backend() const { return *backend_; }
 
-    void set_root(Widget* widget);
+    Window& set_root(Widget* widget);
     Widget* root() const { return root_; }
 
     void invalidate_area(const RectF& rect);
     void invalidate_all();
-    void set_focus(Widget* widget);
-    Widget* focused() const { return focused_; }
+    Window& set_focus(Widget* widget);
+    Widget* focus() const { return focused_; }
     // Renders one frame (record damage + replay + Present). Call once per drained
     // message batch; Present blocks on vsync, setting the render cadence.
     bool pump();
+
+    // Pixel capture: call set_capture(true) before pump(), then capture_pixels()
+    // after pump() to read back BGRA pixel data from the rendered frame.
+    void set_capture(bool enabled);
+    bool capture_pixels(std::vector<u8>& bgra_out, u32& width, u32& height);
+    void release_capture();
 
     void start_timer(Widget* widget, u32 interval_ms);
     void stop_timer(Widget* widget);
@@ -58,8 +68,32 @@ public:
     void focus_next(bool reverse = false);
     void activate_focused();
 
-    void set_context_menu(ContextMenu* menu) { context_menu_ = menu; }
+    // Window-level keyboard accelerators. Fire before the key reaches the focused
+    // widget (edited keys are not hijacked while a text input is focused; see
+    // Accelerator). Duplicate (vk, mods) entries are replaced.
+    Window& add_accelerator(Accelerator acc);
+    bool remove_accelerator(u32 vk, u8 mods);
+    // True if an accelerator fired for this chord on this call (also true when
+    // one was found and, by the editing-rule, suppressed). Used by tests.
+    bool fire_accelerator(u32 vk, u8 mods);
+
+    Window& set_context_menu(ContextMenu* menu) {
+        context_menu_ = menu;
+        return *this;
+    }
     ContextMenu* context_menu() const { return context_menu_; }
+
+    // General debug overlay: F1 toggles it while associated. Does not own the
+    // pointer. Works regardless of the widget below the cursor.
+    void set_debug_overlay(DebugOverlay* overlay);
+    DebugOverlay* debug_overlay() const { return debug_overlay_; }
+    void toggle_debug_overlay();
+
+    // General widget-tree inspector: F2 toggles it while associated. Does not own
+    // the pointer.
+    void set_widget_inspector(WidgetInspector* inspector);
+    WidgetInspector* widget_inspector() const { return widget_inspector_; }
+    void toggle_widget_inspector();
 
     // Frame performance stats (cumulative; sample and diff over an interval for
     // averages): pump adds to these on every committed frame
@@ -79,17 +113,40 @@ public:
 
     // Borderless: hides the system title bar/frame; edges within 8 DIP resize
     // (WM_NCHITTEST) and maximized avoids the taskbar. Settable before or after create.
-    void set_borderless(bool borderless);
+    Window& set_borderless(bool borderless);
     bool borderless() const { return borderless_; }
 
     // Custom caption: blank areas of the widget subtree return HTCAPTION (drag to
     // move); child controls still get mouse events. Does not own the pointer.
-    void set_caption(Widget* widget);
+    Window& set_caption(Widget* widget);
     Widget* caption() const { return caption_; }
 
     void minimize();
     void maximize_toggle();
     bool maximized() const;
+
+    // ===== Secondary-window ownership (5.2.4) =====
+    // Ownership, modal behavior, and Z-order govern how windows coexist. Set before
+    // create() where possible.
+    //
+    // Owner window: the secondary window is behaviorally bound to this window —
+    // it hides with the owner, is always kept above it (WS_EX_OWNER on the owner,
+    // topmost while modal), and is minimized/restored with it.
+    Window& set_owner(Window* owner);
+    Window* owner() const { return owner_; }
+
+    // Modal: disables the owner (keyboard + mouse) for the lifetime of this window
+    // and pumps its own nested message loop so callers can block on window.loop_until_closed().
+    Window& set_modal(bool modal);
+    bool modal() const { return modal_; }
+
+    // Keeps this window above normal windows (WS_EX_TOPMOST).
+    Window& set_topmost(bool topmost);
+    bool topmost() const { return topmost_; }
+
+    // Runs a nested message loop until this window's close() is issued or the
+    // window is destroyed. Pairs with set_modal for application/dialog style flow.
+    void loop_until_closed();
 
     // Unbinds window state pointers (hover/capture/focus/drag/timers) when a widget
     // is destroyed, so the window never dispatches to a dangling widget.
@@ -151,6 +208,8 @@ private:
     bool focus_visible_ = false;  // focus ring shows only after keyboard nav (Tab/Enter), not mouse clicks
     Widget* drag_source_ = nullptr;
     ContextMenu* context_menu_ = nullptr;
+    DebugOverlay* debug_overlay_ = nullptr;
+    WidgetInspector* widget_inspector_ = nullptr;
     f32 press_x_ = 0.0f;
     f32 press_y_ = 0.0f;
     f32 grab_dx_ = 0.0f;
@@ -167,6 +226,11 @@ private:
     bool closing_ = false;
     bool borderless_ = false;
     Widget* caption_ = nullptr;
+    // ===== Secondary-window ownership =====
+    Window* owner_ = nullptr;
+    bool modal_ = false;
+    bool topmost_ = false;
+    void update_owner_state();
     // Manual drag/resize state: resize_zone_ is HT* (resize) or HTCAPTION (move),
     // 0 = idle. Borderless windows drive gestures themselves — the system hit cache
     // reports HTCLIENT for client areas, so no WM_NCLBUTTONDOWN arrives.
@@ -187,6 +251,10 @@ private:
     f32 last_anim_frame_ms_ = 0.0f;
     f32 last_frame_ms_ = 0.0f;
     FrameStats frame_stats_;
+
+    // ===== Accelerators =====
+    std::vector<Accelerator> accelerators_;
+    bool suppress_accelerator_match_ = false;
 
     // ===== IME state =====
     void* ime_prev_context_ = nullptr;  // HIMC saved while IME is disabled

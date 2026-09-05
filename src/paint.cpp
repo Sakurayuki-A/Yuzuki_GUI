@@ -181,7 +181,7 @@ void PaintContext::replay(const RectF& damage_rect) {
                 break;
             case PaintCommand::Type::DrawText:
                 backend_.draw_text(cmd.font, cmd.text, cmd.rect, cmd.color_a, cmd.align_h,
-                                   cmd.align_v);
+                                   cmd.align_v, cmd.wrap);
                 break;
             default:
                 break;
@@ -367,7 +367,7 @@ void PaintContext::draw_line(Point a, Point b, const Color& color, f32 width) co
 }
 
 void PaintContext::draw_text(const String& text, const RectF& rect, const Color& color,
-                             TextAlignH align_h, TextAlignV align_v) const {
+                             TextAlignH align_h, TextAlignV align_v, bool wrap) const {
     if (color.is_transparent()) return;
     const RectF w = rect.translated(offset_x_, offset_y_);
     track(w);
@@ -379,11 +379,12 @@ void PaintContext::draw_text(const String& text, const RectF& rect, const Color&
     cmd.align_h = align_h;
     cmd.align_v = align_v;
     cmd.text = text;
+    cmd.wrap = wrap;
     push_command(std::move(cmd));
 }
 
 void PaintContext::draw_text_small(const String& text, const RectF& rect, const Color& color,
-                                   TextAlignH align_h, TextAlignV align_v) const {
+                                   TextAlignH align_h, TextAlignV align_v, bool wrap) const {
     if (color.is_transparent()) return;
     const RectF w = rect.translated(offset_x_, offset_y_);
     track(w);
@@ -395,6 +396,7 @@ void PaintContext::draw_text_small(const String& text, const RectF& rect, const 
     cmd.align_h = align_h;
     cmd.align_v = align_v;
     cmd.text = text;
+    cmd.wrap = wrap;
     push_command(std::move(cmd));
 }
 
@@ -412,7 +414,7 @@ FontId PaintContext::font(const String& family, f32 size, u16 weight, bool itali
 }
 
 void PaintContext::draw_text(FontId font, const String& text, const RectF& rect, const Color& color,
-                             TextAlignH align_h, TextAlignV align_v) const {
+                             TextAlignH align_h, TextAlignV align_v, bool wrap) const {
     if (color.is_transparent() || font == kInvalidFont) return;
     const RectF w = rect.translated(offset_x_, offset_y_);
     track(w);
@@ -424,6 +426,7 @@ void PaintContext::draw_text(FontId font, const String& text, const RectF& rect,
     cmd.align_h = align_h;
     cmd.align_v = align_v;
     cmd.text = text;
+    cmd.wrap = wrap;
     push_command(std::move(cmd));
 }
 
@@ -447,8 +450,8 @@ Size PaintContext::measure_text(const String& text, bool small) const {
     return backend_.measure_text(small ? font_small_ : font_, text, 1e7f);
 }
 
-Size PaintContext::measure_text(const String& text, bool small, f32 max_width) const {
-    return backend_.measure_text(small ? font_small_ : font_, text, max_width);
+Size PaintContext::measure_text(const String& text, bool small, f32 max_width, bool wrap) const {
+    return backend_.measure_text(small ? font_small_ : font_, text, max_width, wrap);
 }
 
 }  // namespace yzk

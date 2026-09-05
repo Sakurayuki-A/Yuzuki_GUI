@@ -15,8 +15,8 @@ public:
     SpinBox& set_value(f64 value);
 
     SpinBox& set_range(f64 min, f64 max);
-    f64 minimum() const { return min_; }
-    f64 maximum() const { return max_; }
+    f64 min() const { return min_; }
+    f64 max() const { return max_; }
 
     SpinBox& set_step(f64 step) {
         step_ = step;
@@ -38,14 +38,14 @@ public:
     f32 spin_width() const { return spin_width_; }
 
     // Convenience callback registration; the virtual hook below is invoked with it.
-    SpinBox& set_on_value_changed(std::function<void(f64)> cb) {
-        on_value_changed_cb_ = std::move(cb);
+    SpinBox& set_on_changed(std::function<void(f64)> cb) {
+        on_changed_cb_ = std::move(cb);
         return *this;
     }
-    SpinBox& on_value_changed(std::function<void(f64)> cb) { return set_on_value_changed(std::move(cb)); }
+    SpinBox& on_changed(std::function<void(f64)> cb) { return set_on_changed(std::move(cb)); }
 
-    virtual void on_value_changed(f64 value) {
-        if (on_value_changed_cb_) on_value_changed_cb_(value);
+    virtual void on_changed(f64 value) {
+        if (on_changed_cb_) on_changed_cb_(value);
     }
 
     Size measure_impl(Size available, const PaintContext* ctx) override;
@@ -65,7 +65,7 @@ private:
     f32 spin_width_ = 26.0f;
     bool hover_up_ = false;
     bool hover_down_ = false;
-    std::function<void(f64)> on_value_changed_cb_;
+    std::function<void(f64)> on_changed_cb_;
 };
 
 }  // namespace yzk

@@ -29,6 +29,9 @@ public:
     void set_dim(const Color& color) { dim_ = color; }
     void set_dim_blurred(bool blurred) { blurred_ = blurred; }
     void set_shadow(bool shadow) { shadow_ = shadow; }
+    const Color& dim() const { return dim_; }
+    bool dim_blurred() const { return blurred_; }
+    bool shadow() const { return shadow_; }
     void set_panel_rect(const RectF& rect) { panel_rect_ = rect; }
     const RectF& panel_rect() const { return panel_rect_; }
 

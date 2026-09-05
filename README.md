@@ -55,7 +55,9 @@ Yuzuki's future — the best and most realistic target:
 
 ## What's inside
 
-Buttons, text boxes, lists, sliders, combo boxes, menus, notifications, tooltips,
+Buttons, text boxes, lists, sliders, combo boxes, tabbed pages, menus, message boxes,
+native file dialogs, keyboard accelerators, clipboard, notifications, tooltips,
+rich text labels, undo/redo text editing, modal secondary windows,
 flex / grid / dock / wrap layouts, dark & light themes, tweens and transitions,
 vector icon fonts, images, virtualized scrolling, and a perf demo with a 2000-widget
 grid that repaints only what changed.
@@ -64,16 +66,20 @@ grid that repaints only what changed.
 
 | Example        | What it shows                                                    |
 | -------------- | ---------------------------------------------------------------- |
-| hello          | Minimal app                                                      |
-| controls_demo  | Every built-in control and its events                            |
+| hello          | Minimal app — start here (docs/TUTORIAL.md)                      |
+| playground     | Iterative playground over every widget, layout, and event        |
 | animation_demo | Animations, transitions, effects                                 |
-| transform_demo | Visual transforms and auto-animation                             |
 | icofont_demo   | 100 Phosphor icons in a virtualized grid; click to copy codepoints |
 | window_demo    | Borderless windows, custom captions, resize, maximize            |
 | render_demo    | Gradients, shadows, blur, clipping                               |
 | layout_test    | Layout invariants across every panel type                        |
 | perf_demo      | 2000-widget tree with dirty-rect partial repaint                 |
+| explorer       | A file explorer built on the framework                            |
 | codex_ui       | A full chat UI built on the framework                            |
+| debug_demo     | DebugOverlay (F1) and WidgetInspector (F2) walkthrough           |
+| api_validate   | Runnable transcription of docs/API.md — docs verified as code    |
+| app_shell      | Clone-and-start template: app icon + DPI/ComCtl manifest         |
+| cookbook_*     | Cookbook pages — settings, login, chat, dialogs (docs/COOKBOOK.md) |
 
 ## Open-source fonts
 

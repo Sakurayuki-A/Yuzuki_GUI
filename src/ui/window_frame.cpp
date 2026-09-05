@@ -245,6 +245,19 @@ bool Window::pump() {
     return false;
 }
 
+void Window::set_capture(bool enabled) {
+    if (backend_) backend_->set_capture_before_frame(enabled);
+}
+
+bool Window::capture_pixels(std::vector<u8>& bgra_out, u32& width, u32& height) {
+    if (!backend_) return false;
+    return backend_->capture_pixels(bgra_out, width, height);
+}
+
+void Window::release_capture() {
+    if (backend_) backend_->release_capture();
+}
+
 void Window::on_resize(u32 width_px, u32 height_px) {
     // Same-size WM_SIZE messages (frame tweaks, ShowWindow) are no-ops: skipping the
     // backend resize, the full invalidate AND the broadcast keeps them free.

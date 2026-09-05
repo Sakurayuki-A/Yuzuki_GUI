@@ -15,6 +15,8 @@ public:
     f32 max() const { return max_; }
 
     Slider& set_range(f32 min, f32 max);
+    Slider& set_min(f32 min) { return set_range(min, max_); }
+    Slider& set_max(f32 max) { return set_range(min_, max); }
     Slider& set_value(f32 value);
 
     // Convenience callback registration; the virtual hook below is invoked with it.

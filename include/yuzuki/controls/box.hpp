@@ -41,9 +41,12 @@ public:
 
     Box& set_border_width(f32 width);
     f32 border_width() const { return border_width_; }
+    Box& border_width(f32 width) { return set_border_width(width); }
     Box& set_border_color(const Color& color);
     const Color& border_color() const { return border_color_; }
+    Box& border_color(const Color& color) { return set_border_color(color); }
     Box& set_border(f32 width, const Color& color);
+    Box& border(f32 width, const Color& color) { return set_border(width, color); }
 
     Box& set_padding(f32 padding);
     f32 padding() const { return padding_; }
@@ -52,6 +55,7 @@ public:
     // Shadow: blur radius (DIP), offset_y downward; blur <= 0 disables
     Box& set_shadow(f32 blur, f32 offset_y = 4.0f);
     Box& set_shadow_color(const Color& color);
+    const Color& shadow_color() const { return shadow_color_; }
     Box& shadow(f32 blur, f32 offset_y = 4.0f) { return set_shadow(blur, offset_y); }
     f32 shadow_blur() const { return shadow_blur_; }
     f32 shadow_offset_y() const { return shadow_offset_y_; }

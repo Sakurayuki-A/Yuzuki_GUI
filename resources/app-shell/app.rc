@@ -1,0 +1,9 @@
+// Yuzuki app-shell resources: application icon.
+// The DPI / ComCtl-v6 manifest is merged via the linker (/MANIFESTINPUT) instead
+// of an RC resource so it coexists with the runtime manifest (both live under the
+// same RT_MANIFEST id 1 without an RC/link conflict).
+#include <windows.h>
+
+// Application icon (RT_GROUP_ICON, ID 1): the lowest ID is what Explorer shows
+// in the file list and the title bar for apps that don't set one per-window.
+1 ICON "yuzuki.ico"

@@ -34,12 +34,12 @@ public:
     }
     f32 icon_size() const { return icon_size_; }
 
-    Button& set_min_width(f32 width) {
-        min_width_ = width;
-        invalidate();
-        return *this;
-    }
-    f32 min_width() const { return min_width_; }
+    // Fluent chaining alias that keeps the Button& return type (Widget::set_min_width
+    // returns Widget&, which would break Button-specific fluent chains). Storage is
+    // Widget::min_size_ — the same concept, one data source.
+    Button& set_min_width(f32 width) { return static_cast<Button&>(Widget::set_min_width(width)); }
+    f32 min_width() const { return min_size().width; }
+    Button& width(f32 w) { return set_min_width(w); }
 
     Button& set_padding(f32 padding) {
         padding_ = padding;
@@ -68,6 +68,9 @@ public:
     void paint_impl(PaintContext& ctx) override;
     void on_event(Event& e) override;
 
+    String uia_name() const override { return text_; }
+    String uia_role() const override { return "Button"; }
+
     // Keyboard activation (Tab navigation + Enter)
     void activate() { on_click(); }
 
@@ -77,7 +80,6 @@ public:
 
 private:
     String text_;
-    f32 min_width_ = 80.0f;
     f32 padding_ = 10.0f;
     bool accent_ = true;
     IconId icon_ = IconId::None;

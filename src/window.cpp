@@ -4,12 +4,15 @@
 #include <yuzuki/ui/window.hpp>
 
 #include <yuzuki/ui/application.hpp>
+#include <yuzuki/ui/debug_overlay.hpp>
+#include <yuzuki/ui/widget_inspector.hpp>
 #include <yuzuki/core/encoding.hpp>
 #include "ui/window_internal.hpp"
 #include "render/d2d/d2d_backend.hpp"
 
 #include <imm.h>
 #include <shellapi.h>
+#include <mmsystem.h>
 
 #ifdef _MSC_VER
 #pragma comment(lib, "shell32.lib")
@@ -59,9 +62,11 @@ bool Window::create(void* instance) {
     const DWORD style =
         borderless_ ? (WS_POPUP | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU)
                     : WS_OVERLAPPEDWINDOW;
+    const DWORD ex_style = topmost_ ? WS_EX_TOPMOST : 0;
+    HWND owner_hwnd = owner_ ? static_cast<HWND>(owner_->native_handle()) : nullptr;
     HWND hwnd = CreateWindowExW(
-        0, kWindowClass, utf::to_wide(title_).c_str(), style,
-        CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, nullptr, nullptr, hinst, nullptr);
+        ex_style, kWindowClass, utf::to_wide(title_).c_str(), style,
+        CW_USEDEFAULT, CW_USEDEFAULT, 0, 0, owner_hwnd, nullptr, hinst, nullptr);
     if (!hwnd) return false;
 
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
@@ -90,8 +95,45 @@ bool Window::create(void* instance) {
     bounds_ = RectF::make(0.0f, 0.0f, static_cast<f32>(client_width_), static_cast<f32>(client_height_));
 
     Application::instance().add_window(this);
+    if (owner_) update_owner_state();
     invalidate_all();
     return true;
+}
+
+void Window::update_owner_state() {
+    if (!hwnd_) return;
+    HWND hwnd = static_cast<HWND>(hwnd_);
+    if (owner_) {
+        // Bind to the owner: minimize with it, stay above it, and if modal,
+        // disable the owner for the lifetime of this window.
+        SetWindowLongPtrW(hwnd, GWLP_HWNDPARENT,
+                          reinterpret_cast<LONG_PTR>(owner_->native_handle()));
+    }
+    if (modal_) {
+        HWND owner_hwnd = owner_ ? static_cast<HWND>(owner_->native_handle()) : nullptr;
+        if (owner_hwnd) EnableWindow(owner_hwnd, FALSE);
+        SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+    } else if (topmost_) {
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    }
+}
+
+Window& Window::set_owner(Window* owner) {
+    owner_ = owner;
+    if (hwnd_) update_owner_state();
+    return *this;
+}
+
+Window& Window::set_modal(bool modal) {
+    modal_ = modal;
+    if (hwnd_) update_owner_state();
+    return *this;
+}
+
+Window& Window::set_topmost(bool topmost) {
+    topmost_ = topmost;
+    if (hwnd_) update_owner_state();
+    return *this;
 }
 
 void Window::destroy() {
@@ -102,9 +144,30 @@ void Window::destroy() {
     capture_ = nullptr;
     focused_ = nullptr;
     kill_all_timers();
+    // A modal window re-enables its owner when it goes away.
+    if (modal_ && owner_ && owner_->native_handle()) {
+        EnableWindow(static_cast<HWND>(owner_->native_handle()), TRUE);
+    }
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
     backend_->destroy_target();
     DestroyWindow(hwnd);
+}
+
+void Window::loop_until_closed() {
+    if (!hwnd_) return;
+    timeBeginPeriod(1);
+    MSG msg{};
+    while (hwnd_) {
+        if (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) break;
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        } else {
+            pump();
+            if (hwnd_) WaitMessage();
+        }
+    }
+    timeEndPeriod(1);
 }
 
 void Window::show() {
@@ -119,7 +182,7 @@ void Window::close() {
     PostMessageW(static_cast<HWND>(hwnd_), WM_CLOSE, 0, 0);
 }
 
-void Window::set_root(Widget* widget) {
+Window& Window::set_root(Widget* widget) {
     context_menu_ = nullptr;
     if (root_ && root_ != widget) {
         root_->remove_from_parent();
@@ -141,6 +204,7 @@ void Window::set_root(Widget* widget) {
         root_->set_bounds(bounds_);
     }
     invalidate_all();
+    return *this;
 }
 
 void Window::detach_widget(Widget* widget) {
@@ -160,8 +224,8 @@ void Window::detach_widget(Widget* widget) {
     stop_timer(widget);
 }
 
-void Window::set_focus(Widget* widget) {
-    if (focused_ == widget) return;
+Window& Window::set_focus(Widget* widget) {
+    if (focused_ == widget) return *this;
     if (focused_) {
         Event lost;
         lost.type = EventType::FocusLost;
@@ -179,6 +243,82 @@ void Window::set_focus(Widget* widget) {
     // the IME UI anchors.
     apply_ime_focus();
     refresh_ime_anchor();
+    return *this;
+}
+
+namespace {
+
+// Chords the focused text input already "owns": plain alphanumeric/editing keys
+// (which Type/Backspace/arrows/etc. consume) plus the Ctrl editing combos. App
+// chords (Ctrl+S, Ctrl+Shift+T, Alt+... and similar) are never stolen.
+bool is_editing_chord(u32 vk, u8 mods) {
+    if (mods == KeyModifier_None) {
+        if (vk >= '0' && vk <= '9') return true;
+        if (vk >= 'A' && vk <= 'Z') return true;
+        switch (vk) {
+            case VK_BACK: case VK_DELETE: case VK_LEFT: case VK_RIGHT:
+            case VK_UP: case VK_DOWN: case VK_HOME: case VK_END:
+            case VK_RETURN: case VK_SPACE: case VK_TAB: case VK_ESCAPE:
+            case VK_OEM_1: case VK_OEM_2: case VK_OEM_3: case VK_OEM_4:
+            case VK_OEM_5: case VK_OEM_6: case VK_OEM_7: case VK_OEM_PLUS:
+            case VK_OEM_MINUS: case VK_OEM_COMMA: case VK_OEM_PERIOD:
+                return true;
+            default:
+                return false;
+        }
+    }
+    if (mods == (KeyModifier_Control | KeyModifier_None)) {
+        switch (vk) {
+            case 'A': case 'Z': case 'X': case 'C': case 'V': case 'Y':
+            case 'K': case 'U':  // delete-to-line-start / delete-line
+            case VK_LEFT: case VK_RIGHT: case VK_BACK: case VK_DELETE:
+            case VK_HOME: case VK_END:
+                return true;  // word nav / word delete / scalar jumps TextBox handles
+            default:
+                return false;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+Window& Window::add_accelerator(Accelerator acc) {
+    for (auto& a : accelerators_) {
+        if (a.vk == acc.vk && a.mods == acc.mods) {
+            a.action = std::move(acc.action);
+            return *this;
+        }
+    }
+    accelerators_.push_back(std::move(acc));
+    return *this;
+}
+
+bool Window::remove_accelerator(u32 vk, u8 mods) {
+    for (auto it = accelerators_.begin(); it != accelerators_.end(); ++it) {
+        if (it->vk == vk && it->mods == mods) {
+            accelerators_.erase(it);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Window::fire_accelerator(u32 vk, u8 mods) {
+    suppress_accelerator_match_ = false;
+    for (const auto& a : accelerators_) {
+        if (a.vk != vk || a.mods != mods) continue;
+        if (!a.action) return true;  // registered but empty: matched, nothing to run
+        if (focused_ && focused_->wants_ime() && is_editing_chord(vk, mods)) {
+            // The focused text input owns this chord: let it reach the widget as a
+            // normal key instead. Still a "match" so we stop processing here.
+            suppress_accelerator_match_ = true;
+            return true;
+        }
+        a.action();
+        return true;
+    }
+    return false;
 }
 
 void Window::refresh_ime_anchor() {
@@ -265,6 +405,24 @@ void Window::on_ime_end_composition() {
     e.data.ime.length = 0;
     e.data.ime.cursor = 0;
     focused_->on_event(e);
+}
+
+void Window::set_debug_overlay(DebugOverlay* overlay) {
+    debug_overlay_ = overlay;
+}
+
+void Window::toggle_debug_overlay() {
+    if (!debug_overlay_) return;
+    debug_overlay_->toggle(*this);
+}
+
+void Window::set_widget_inspector(WidgetInspector* inspector) {
+    widget_inspector_ = inspector;
+}
+
+void Window::toggle_widget_inspector() {
+    if (!widget_inspector_) return;
+    widget_inspector_->toggle(*this);
 }
 
 void Window::start_timer(Widget* widget, u32 interval_ms) {

@@ -3,10 +3,10 @@
 
 namespace yzk {
 
-void Window::set_borderless(bool borderless) {
-    if (borderless_ == borderless) return;
+Window& Window::set_borderless(bool borderless) {
+    if (borderless_ == borderless) return *this;
     borderless_ = borderless;
-    if (!hwnd_) return;
+    if (!hwnd_) return *this;
     HWND hwnd = static_cast<HWND>(hwnd_);
     LONG style = GetWindowLongW(hwnd, GWL_STYLE);
     style &= ~(WS_OVERLAPPEDWINDOW | WS_POPUP | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_SYSMENU);
@@ -16,10 +16,12 @@ void Window::set_borderless(bool borderless) {
     SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     invalidate_all();
+    return *this;
 }
 
-void Window::set_caption(Widget* widget) {
+Window& Window::set_caption(Widget* widget) {
     caption_ = widget;
+    return *this;
 }
 
 void Window::minimize() {

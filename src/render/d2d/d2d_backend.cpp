@@ -49,8 +49,8 @@ void D2DBackend::destroy_target() {
     sweep_snapshot_h_ = 0;
     sweep_snapshot_dpi_ = 0;
     swap_chain_.Reset();
-    device_.Reset();
     context_.Reset();
+    device_.Reset();
     brush_.Reset();
     // Everything else is bound to the dead context/device and must not leak into the
     // next one (D2DERR_WRONG_RESOURCE_DOMAIN on the following EndDraw otherwise):
@@ -61,8 +61,8 @@ void D2DBackend::destroy_target() {
     rounded_geometry_.Reset();
     rounded_geometry_rect_ = D2D1_RECT_F{};
     rounded_geometry_radius_ = 0.0f;
-    sweep_effect_impl_ = nullptr;
     sweep_effect_.Reset();
+    sweep_effect_impl_ = nullptr;
     // Invalidate all device-bound caches to avoid dangling bitmaps. Bitmap WIC sources
     // are kept so the device-dependent ID2D1Bitmaps rebuild lazily on next use and
     // BitmapIds stay valid across device loss.
@@ -71,6 +71,7 @@ void D2DBackend::destroy_target() {
     gradient_cache_.clear();
     gradient_lru_.clear();
     for (BitmapEntry& entry : bitmaps_) entry.bitmap.Reset();
+    capture_staging_.Reset();
 }
 
 bool D2DBackend::create_device() {
@@ -329,6 +330,31 @@ bool D2DBackend::end_frame() {
     if (FAILED(hr)) return false;
     context_->SetTarget(layer_.Get());
 
+    // Pixel capture: copy back buffer to staging texture before Present()
+    // (FLIP_DISCARD discards the back buffer after Present).
+    if (capture_frame_ && d3d_device_ && swap_chain_) {
+        Microsoft::WRL::ComPtr<IDXGISurface> dxgi_surface;
+        if (SUCCEEDED(swap_chain_->GetBuffer(0, IID_PPV_ARGS(&dxgi_surface)))) {
+            Microsoft::WRL::ComPtr<ID3D11Texture2D> back_buffer;
+            if (SUCCEEDED(dxgi_surface.As(&back_buffer))) {
+                if (!capture_staging_) {
+                    D3D11_TEXTURE2D_DESC desc{};
+                    back_buffer->GetDesc(&desc);
+                    desc.Usage = D3D11_USAGE_STAGING;
+                    desc.BindFlags = 0;
+                    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                    desc.MiscFlags = 0;
+                    d3d_device_->CreateTexture2D(&desc, nullptr, &capture_staging_);
+                }
+                if (capture_staging_) {
+                    Microsoft::WRL::ComPtr<ID3D11DeviceContext> ctx;
+                    d3d_device_->GetImmediateContext(&ctx);
+                    if (ctx) ctx->CopyResource(capture_staging_.Get(), back_buffer.Get());
+                }
+            }
+        }
+    }
+
     // Deferred shadows are rendered here, after the drawing session ended (EndDraw
     // succeeded), where nested SetTarget + BeginDraw/EndDraw is safe; request an
     // immediate repaint so shadows appear instead of waiting for the next natural
@@ -362,6 +388,12 @@ bool D2DBackend::handle_device_lost() {
         create_target(hwnd_, width_px_, height_px_, dpi_);
     }
     return false;
+}
+
+bool D2DBackend::recreate_after_loss() {
+    destroy_target();
+    return hwnd_ && width_px_ > 0 && height_px_ > 0 &&
+           create_target(hwnd_, width_px_, height_px_, dpi_);
 }
 
 void D2DBackend::begin_clip(const RectF& rect) {
@@ -425,6 +457,36 @@ bool D2DBackend::ensure_brush(const Color& color) {
     HRESULT hr = context_->CreateSolidColorBrush(to_d2d(color), &brush_);
     return SUCCEEDED(hr);
 }
+
+bool D2DBackend::capture_pixels(std::vector<u8>& bgra_out, u32& width, u32& height) {
+    if (!capture_staging_) return false;
+    D3D11_TEXTURE2D_DESC desc{};
+    capture_staging_->GetDesc(&desc);
+    width = desc.Width;
+    height = desc.Height;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> ctx;
+    d3d_device_->GetImmediateContext(&ctx);
+    if (!ctx) return false;
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    HRESULT hr = ctx->Map(capture_staging_.Get(), 0, D3D11_MAP_READ, 0, &mapped);
+    if (FAILED(hr)) return false;
+    const u32 bpp = 4;  // BGRA8
+    bgra_out.resize(static_cast<size_t>(width) * height * bpp);
+    if (mapped.RowPitch == width * bpp) {
+        memcpy(bgra_out.data(), mapped.pData, bgra_out.size());
+    } else {
+        const u8* src = static_cast<const u8*>(mapped.pData);
+        u8* dst = bgra_out.data();
+        for (u32 y = 0; y < height; ++y) {
+            memcpy(dst, src + y * mapped.RowPitch, width * bpp);
+            dst += width * bpp;
+        }
+    }
+    ctx->Unmap(capture_staging_.Get(), 0);
+    return true;
+}
+
+void D2DBackend::release_capture() { capture_staging_.Reset(); }
 
 }  // namespace yzk
 

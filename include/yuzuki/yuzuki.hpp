@@ -1,9 +1,9 @@
 #pragma once
 
 #define YUZUKI_VERSION_MAJOR 0
-#define YUZUKI_VERSION_MINOR 2
+#define YUZUKI_VERSION_MINOR 3
 #define YUZUKI_VERSION_PATCH 0
-#define YUZUKI_VERSION "0.2.0"
+#define YUZUKI_VERSION "0.3.0"
 
 #include <yuzuki/core/types.hpp>
 #include <yuzuki/core/event.hpp>
@@ -13,10 +13,14 @@
 
 #include <yuzuki/ui/theme.hpp>
 #include <yuzuki/ui/paint.hpp>
+#include <yuzuki/ui/clipboard.hpp>
+#include <yuzuki/ui/dialog.hpp>
 #include <yuzuki/ui/widget.hpp>
 #include <yuzuki/ui/window.hpp>
 #include <yuzuki/ui/application.hpp>
 #include <yuzuki/ui/overlay.hpp>
+#include <yuzuki/ui/debug_overlay.hpp>
+#include <yuzuki/ui/widget_inspector.hpp>
 
 #include <yuzuki/controls/label.hpp>
 #include <yuzuki/controls/button.hpp>
@@ -41,3 +45,7 @@
 #include <yuzuki/controls/notification.hpp>
 #include <yuzuki/controls/image.hpp>
 #include <yuzuki/controls/tooltip.hpp>
+#include <yuzuki/controls/icon.hpp>
+#include <yuzuki/controls/tab_control.hpp>
+
+#include <yuzuki/ui/animation.hpp>

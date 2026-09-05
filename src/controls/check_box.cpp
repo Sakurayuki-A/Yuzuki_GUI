@@ -4,7 +4,6 @@ namespace yzk {
 
 namespace {
 constexpr f32 kBoxSize = 18.0f;
-constexpr f32 kHeight = 28.0f;
 }
 
 CheckBox::CheckBox(String text) : text_(std::move(text)) {
@@ -30,7 +29,8 @@ Size CheckBox::measure_impl(Size available, const PaintContext* ctx) {
     (void)available;
     f32 text_w = 0.0f;
     if (ctx && !text_.empty()) text_w = ctx->measure_text(text_).width;
-    return Size{kBoxSize + 8.0f + text_w, kHeight};
+    const f32 height = ctx ? ctx->theme().control_height_compact : 28.0f;
+    return Size{kBoxSize + 8.0f + text_w, height};
 }
 
 void CheckBox::paint_impl(PaintContext& ctx) {
@@ -42,7 +42,7 @@ void CheckBox::paint_impl(PaintContext& ctx) {
     const Color border = checked_ ? theme.accent : (has_flag(Flag_Hovered) ? theme.border_hover : theme.border);
 
     ctx.fill_rounded(box, fill, 4.0f);
-    ctx.draw_border(box, border, 1.0f, 4.0f);
+    ctx.draw_border(box, border, theme.border_width, 4.0f);
 
     if (checked_) {
         const f32 cx = box.left + 4.0f;

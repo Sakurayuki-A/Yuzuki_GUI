@@ -170,9 +170,9 @@ ComboBox& ComboBox::set_selected_index(i32 index) {
     selected_ = index;
     invalidate();
     // Only notify once attached to a Window. During construction / before the widget
-    // tree is connected, window() is null and an on_change callback that reaches into
+    // tree is connected, window() is null and an on_changed callback that reaches into
     // uninitialized siblings (e.g. another widget's selected state) would be unsafe.
-    if (index >= 0 && window()) on_change(index);
+    if (index >= 0 && window()) on_changed(index);
     return *this;
 }
 
@@ -219,19 +219,19 @@ ComboBox& ComboBox::close_popup() {
 
 Size ComboBox::measure_impl(Size available, const PaintContext* ctx) {
     (void)available;
-    (void)ctx;
-    return Size{width_, 32.0f};
+    const f32 height = ctx ? ctx->theme().control_height : 32.0f;
+    return Size{width_, height};
 }
 
 void ComboBox::paint_impl(PaintContext& ctx) {
     const Theme& theme = ctx.theme();
-    const f32 radius = theme.corner_radius;
+    const f32 radius = theme.control_radius;
 
     Color border = is_open() ? theme.accent : theme.border;
     if (has_flag(Flag_Hovered) && !is_open()) border = theme.border_hover;
 
     ctx.fill_rounded(bounds_, theme.surface, radius);
-    ctx.draw_border(bounds_, border, 1.0f, radius);
+    ctx.draw_border(bounds_, border, theme.border_width, radius);
 
     const RectF text_rect = RectF::make(bounds_.left + 10.0f, bounds_.top,
                                         bounds_.width() - 10.0f - 26.0f, bounds_.height());

@@ -21,9 +21,9 @@ class ContextMenu : public Widget {
 public:
     ContextMenu() = default;
 
-    void add_item(const String& text, std::function<void()> action);
-    void add_separator();
-    void clear_items();
+    ContextMenu& add_item(const String& text, std::function<void()> action);
+    ContextMenu& add_separator();
+    ContextMenu& clear_items();
     const std::vector<ContextMenuItem>& items() const { return items_; }
 
     void open(Window& win, f32 x, f32 y);

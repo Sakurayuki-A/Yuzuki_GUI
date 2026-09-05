@@ -120,9 +120,10 @@ void Notification::paint_impl(PaintContext& ctx) {
     const f32 slide = (1.0f - ease(p, Easing::OutCubic)) * kSlidePx;
     const RectF rect = bounds_.translated(slide, 0.0f);
 
-    ctx.draw_shadow(rect, 8.0f, 12.0f, Color{0x00, 0x00, 0x00, (u8)(40 * p)});
+    ctx.draw_shadow(rect, 8.0f, theme.shadow_blur_notice,
+                    Color{0x00, 0x00, 0x00, (u8)(theme.shadow_alpha_notice * p)});
     ctx.fill_rounded(rect, card, 8.0f);
-    ctx.draw_border(rect, border, 1.0f, 8.0f);
+    ctx.draw_border(rect, border, theme.border_width, 8.0f);
 
     const Color icon_color = accent.with_alpha((u8)(accent.a * p));
     ctx.draw_icon(type_icon(type_), RectF::make(rect.left + 14.0f, rect.top + 10.0f, 20.0f, 20.0f),

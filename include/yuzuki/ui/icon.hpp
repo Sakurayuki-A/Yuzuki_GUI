@@ -34,12 +34,12 @@ public:
 // the executable; override the path via icon::set_phosphor_font_file() before first draw.
 IconProvider& phosphor_provider();
 // Optional: point the Phosphor provider at a custom TTF path.
-void set_phosphor_font_file(const String& path);
+IconProvider& set_phosphor_font_file(const String& path);
 
 // Installs the app-wide icon provider (default: Phosphor). Yuzuki comes with a
 // built-in PhosphorIconProvider; call set_provider to swap the icon backend.
 // Takes ownership of the provider; passing nullptr restores the default.
-void set_provider(std::unique_ptr<IconProvider> provider);
+IconProvider& set_provider(std::unique_ptr<IconProvider> provider);
 IconProvider& provider();
 
 }  // namespace icon

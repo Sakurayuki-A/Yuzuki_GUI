@@ -48,6 +48,7 @@ struct PaintCommand {
     TextAlignH align_h = TextAlignH::Center;
     TextAlignV align_v = TextAlignV::Center;
     String text;
+    bool wrap = false;  // DrawText: multi-line word-wrap (TextBox) vs single-line (default)
     Transform2D transform;  // PushVisual: the widget's visual transform (input -> window space)
     std::vector<GradientStop> stops;  // FillSweepGradient: explicit stop list
 };
@@ -111,21 +112,22 @@ public:
     void draw_bitmap(BitmapId id, const RectF& rect, f32 radius = 0.0f) const;
 
     void draw_text(const String& text, const RectF& rect, const Color& color,
-                   TextAlignH align_h = TextAlignH::Center, TextAlignV align_v = TextAlignV::Center) const;
+                   TextAlignH align_h = TextAlignH::Center, TextAlignV align_v = TextAlignV::Center,
+                   bool wrap = false) const;
     void draw_text_small(const String& text, const RectF& rect, const Color& color,
                          TextAlignH align_h = TextAlignH::Left,
-                         TextAlignV align_v = TextAlignV::Top) const;
+                         TextAlignV align_v = TextAlignV::Top, bool wrap = false) const;
 
     // Cached FontId per family/size (created once per frame); draw glyphs with it
     FontId font(const String& family, f32 size, u16 weight = 400, bool italic = false) const;
     void draw_text(FontId font, const String& text, const RectF& rect, const Color& color,
                    TextAlignH align_h = TextAlignH::Center,
-                   TextAlignV align_v = TextAlignV::Center) const;
+                   TextAlignV align_v = TextAlignV::Center, bool wrap = false) const;
     Size measure_text(FontId font, const String& text) const;
 
     Size measure_text(const String& text) const;
     Size measure_text(const String& text, bool small) const;
-    Size measure_text(const String& text, bool small, f32 max_width) const;
+    Size measure_text(const String& text, bool small, f32 max_width, bool wrap = true) const;
 
     // One-line icon draw. Uses the global Icon Provider (default: Phosphor);
     // the provider's font files are registered lazily on first use, and the

@@ -33,7 +33,7 @@ void ToggleSwitch::paint_impl(PaintContext& ctx) {
 
     const Color track_color = checked_ ? theme.accent : theme.track;
     ctx.fill_rounded(track, track_color, kTrackHeight / 2.0f);
-    if (!checked_) ctx.draw_border(track, theme.border, 1.0f, kTrackHeight / 2.0f);
+    if (!checked_) ctx.draw_border(track, theme.border, theme.border_width, kTrackHeight / 2.0f);
 
     const f32 thumb_x = checked_ ? track.right - kThumbSize - 2.0f : track.left + 2.0f;
     const f32 thumb_y = track.top + (kTrackHeight - kThumbSize) / 2.0f;

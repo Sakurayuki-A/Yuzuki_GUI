@@ -4,7 +4,6 @@ namespace yzk {
 
 namespace {
 constexpr f32 kDotSize = 18.0f;
-constexpr f32 kHeight = 28.0f;
 }
 
 RadioButton::RadioButton(String text) : text_(std::move(text)) {
@@ -31,7 +30,8 @@ Size RadioButton::measure_impl(Size available, const PaintContext* ctx) {
     (void)available;
     f32 text_w = 0.0f;
     if (ctx && !text_.empty()) text_w = ctx->measure_text(text_).width;
-    return Size{kDotSize + 8.0f + text_w, kHeight};
+    const f32 height = ctx ? ctx->theme().control_height_compact : 28.0f;
+    return Size{kDotSize + 8.0f + text_w, height};
 }
 
 void RadioButton::paint_impl(PaintContext& ctx) {
@@ -41,7 +41,7 @@ void RadioButton::paint_impl(PaintContext& ctx) {
     const f32 radius = kDotSize / 2.0f;
 
     ctx.fill_rounded(dot, checked_ ? theme.accent : theme.surface, radius);
-    ctx.draw_border(dot, checked_ ? theme.accent : theme.border, 1.0f, radius);
+    ctx.draw_border(dot, checked_ ? theme.accent : theme.border, theme.border_width, radius);
 
     if (checked_) {
         const f32 inner = 6.0f;

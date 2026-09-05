@@ -4,6 +4,7 @@
 #include <yuzuki/ui/paint.hpp>
 
 #include <functional>
+#include <vector>
 
 namespace yzk {
 
@@ -17,9 +18,17 @@ struct TextBoxConfig {
     TextBoxMode mode = TextBoxMode::SingleLine;
     bool read_only = false;
     u32 max_length = 4096;
+    // Fixed widget height. Multiline uses it as the viewport height (overflow
+    // scrolls internally); max_lines only sizes the fallback when height is unset.
     f32 height = 32.0f;
-    u32 min_lines = 1;
+    u32 min_lines = 1;  // reserved; no longer participates in measurement
     u32 max_lines = 6;
+    // MultiLine only: Enter submits (callback), Ctrl+Enter inserts a newline.
+    bool enter_submits = false;
+    // Skip drawing this control's own surface/border; the host draws the frame
+    // around it (e.g. an input embedded inside a custom composer shell who owns
+    // the full rounded box + border look).
+    bool transparent = false;
 };
 
 class TextBox : public Widget {
@@ -39,7 +48,8 @@ public:
     const TextBoxConfig& config() const { return config_; }
     TextBox& set_config(const TextBoxConfig& config);
 
-    // Enter-to-submit callback for SingleLine mode (ignored in MultiLine / Password passthrough).
+    // Enter-to-submit callback for SingleLine, and for MultiLine when
+    // TextBoxConfig::enter_submits is set (Ctrl+Enter then inserts a newline).
     TextBox& set_on_commit(std::function<void()> cb) {
         on_commit_cb_ = std::move(cb);
         return *this;
@@ -78,6 +88,27 @@ private:
     u32 selection_begin() const { return cursor_ < sel_start_ ? cursor_ : sel_start_; }
     u32 selection_end() const { return cursor_ < sel_start_ ? sel_start_ : cursor_; }
 
+    // ===== Undo / redo (5.3.1) =====
+    enum class EditKind { Typing, Paste, Cut, Delete };
+    struct Snapshot {
+        WString text;
+        u32 cursor = 0;
+        u32 sel = 0;
+    };
+    // Records the pre-edit state unless this edit coalesces into the previous
+    // group (consecutive typing/backspace runs merge into one undo step).
+    void begin_edit(EditKind kind);
+    void undo();
+    void redo();
+    // Word-boundary navigation/delete (Ctrl+Left/Right/Backspace/Delete):
+    // returns the adjacent word boundary index.
+    i32 word_jump(i32 delta) const;
+
+    std::vector<Snapshot> undo_stack_;
+    std::vector<Snapshot> redo_stack_;
+    u64 last_edit_ms_ = 0;
+    EditKind last_kind_ = EditKind::Typing;
+
     WString display_text() const;
     u32 line_index_at(u32 pos) const;
     u32 line_start(u32 line) const;
@@ -97,6 +128,9 @@ private:
     bool caret_visible_ = true;
     bool selecting_ = false;
     f32 scroll_offset_ = 0.0f;
+    // MultiLine vertical scroll (px): keeps the caret line inside the fixed-height
+    // viewport as content outgrows it, using the backend's wrap-aware caret y.
+    f32 scroll_v_ = 0.0f;
     f32 content_inset_ = 0.0f;
 
     // Live IME pre-edit string displayed (virtually) at cursor_; cleared on commit/cancel.

@@ -505,6 +505,22 @@ Widget* make_explorer(Window& win) {
     });
     top->append_child(st->path_box);
 
+    // Browse: native open dialog picks an item; the explorer navigates to its
+    // folder so browsing a tree still feels native (open_file_dialog is the
+    // framework wrapper around IFileOpenDialog).
+    auto* browse = new Button("");
+    browse->set_icon(IconId::FolderOpen).set_min_width(0.0f);
+    browse->on_click([st]() {
+        FileDialogOptions opts;
+        opts.filters = {{"All files", "*.*"}};
+        const auto paths = open_file_dialog(nullptr, opts);
+        if (paths.empty()) return;
+        Path picked = fs::u8path(paths[0]);
+        const Path target = fs::is_directory(picked) ? picked : picked.parent_path();
+        if (!target.empty()) st->open_path(target);
+    });
+    top->append_child(browse);
+
     // Global recursive search (walks the whole tree under the current folder).
     // Worker thread scans; a per-frame callback on the UI thread drains batches.
     st->search_box = new TextBox("");

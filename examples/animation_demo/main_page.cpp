@@ -3,6 +3,7 @@
 #include <yuzuki/controls/notification.hpp>
 #include <yuzuki/controls/context_menu.hpp>
 
+#include <chrono>
 #include <cstdlib>
 
 using namespace yzk;
@@ -449,6 +450,10 @@ public:
     TransformCard(String label, Color color, TransformMode mode)
         : label_(std::move(label)), color_(color), mode_(mode) {
         set_cursor(Cursor::Hand);
+        // Implicit transitions: set_transition(ms) makes every visual setter
+        // (set_scale/set_rotate_deg/set_opacity/set_translate) auto-tween.
+        if (mode_ == TransformMode::ScaleHover) set_transition(180.0f);
+        if (mode_ == TransformMode::FadeClick) set_transition(260.0f);
     }
 
     Size measure_impl(Size available, const PaintContext* ctx) override {
@@ -469,8 +474,7 @@ public:
             case EventType::MouseEnter:
                 add_flag(Flag_Hovered);
                 if (mode_ == TransformMode::ScaleHover) {
-                    as.tween(scale_x(), 1.08f, 160.0f, Easing::OutCubic,
-                             [this](f32 v) { set_scale(v, v); });
+                    set_scale(1.08f, 1.08f);  // implicit transition: auto-tween
                 }
                 e.consumed = true;
                 break;
@@ -478,8 +482,7 @@ public:
             case EventType::MouseLeave:
                 remove_flag(Flag_Hovered);
                 if (mode_ == TransformMode::ScaleHover) {
-                    as.tween(scale_x(), 1.0f, 200.0f, Easing::OutCubic,
-                             [this](f32 v) { set_scale(v, v); });
+                    set_scale(1.0f, 1.0f);  // implicit transition: auto-tween back
                 }
                 e.consumed = true;
                 break;
@@ -487,21 +490,19 @@ public:
             case EventType::MouseDown:
                 if ((e.data.mouse.buttons & MouseButton_Left) != 0) {
                     if (mode_ == TransformMode::SpinClick) {
-                        as.tween(rotate_deg(), rotate_deg() + 360.0f, 700.0f, Easing::OutBack,
-                                 [this](f32 v) { set_rotate_deg(v); });
+                        // Finish the old tween first (it snaps to its end at a 360°
+                        // multiple), or concurrent tweens would fight over the angle.
+                        if (spin_token_) as.finish_tween(spin_token_);
+                        spin_token_ = as.tween(rotate_deg(), rotate_deg() + 360.0f, 700.0f,
+                                               Easing::OutBack,
+                                               [this](f32 v) { set_rotate_deg(v); });
                     } else if (mode_ == TransformMode::FadeClick) {
                         if (faded_) {
-                            as.tween(0.15f, 1.0f, 260.0f, Easing::OutCubic,
-                                     [this](f32 v) {
-                                         set_opacity(v);
-                                         set_translate(0.0f, (1.0f - v) * 6.0f);
-                                     });
+                            set_opacity(1.0f);
+                            set_translate(0.0f, 0.0f);
                         } else {
-                            as.tween(1.0f, 0.15f, 260.0f, Easing::InCubic,
-                                     [this](f32 v) {
-                                         set_opacity(v);
-                                         set_translate(0.0f, (1.0f - v) * 6.0f);
-                                     });
+                            set_opacity(0.15f);
+                            set_translate(0.0f, 6.0f);
                         }
                         faded_ = !faded_;
                     }
@@ -518,8 +519,83 @@ private:
     String label_;
     Color color_;
     TransformMode mode_;
+    AnimationSystem::Token spin_token_ = 0;
     bool faded_ = false;
 };
+
+class AutoCard : public Widget {
+public:
+    AutoCard(String label, Color color) : label_(std::move(label)), color_(color) {}
+
+    Size measure_impl(Size available, const PaintContext* ctx) override {
+        (void)available;
+        (void)ctx;
+        return Size{96.0f, 96.0f};
+    }
+
+    void paint_impl(PaintContext& ctx) override {
+        const RectF b = bounds_;
+        ctx.fill_rounded(b, color_, 12.0f);
+        ctx.draw_text_small(label_, b, demo::Text(), TextAlignH::Center, TextAlignV::Center);
+    }
+
+private:
+    String label_;
+    Color color_;
+};
+
+// Frame-driven animation: on_frame callbacks run at the render pace (every frame),
+// unlike WM_TIMER which lags and coalesces under mouse-message floods.
+class AutoShowcase : public Widget {
+public:
+    AutoShowcase() {
+        spin_ = new AutoCard("rotate", demo::Cyan);
+        bounce_ = new AutoCard("bounce", demo::Amber);
+        pulse_ = new AutoCard("pulse", demo::Pink);
+        append_child(spin_);
+        append_child(bounce_);
+        append_child(pulse_);
+        const f32 kStartMs = static_cast<f32>(
+            std::chrono::duration<double, std::milli>(kStart.time_since_epoch()).count());
+        frame_token_ = AnimationSystem::instance().on_frame([this, kStartMs](f32 now_ms) {
+            const f32 t_ms = now_ms - kStartMs;
+            spin_->set_rotate_deg(t_ms * 0.5f / 16.0f);
+            bounce_->set_translate(0.0f, std::sin(t_ms * 0.004f) * 14.0f);
+            pulse_->set_opacity(0.75f + 0.25f * (0.5f + 0.5f * std::sin(t_ms * 0.003f)));
+        });
+    }
+
+    ~AutoShowcase() override {
+        if (frame_token_) AnimationSystem::instance().stop_frame(frame_token_);
+    }
+
+    Size measure_impl(Size available, const PaintContext* ctx) override {
+        (void)available;
+        (void)ctx;
+        return Size{0.0f, 96.0f};
+    }
+
+    void perform_layout(const PaintContext* ctx) override {
+        Widget* child = first_child();
+        f32 x = 0.0f;
+        while (child) {
+            child->set_bounds(RectF::make(x, 0.0f, 96.0f, 96.0f));
+            child->perform_layout(ctx);
+            x += 96.0f + 14.0f;
+            child = child->next_sibling();
+        }
+    }
+
+private:
+    static const std::chrono::steady_clock::time_point kStart;
+    AnimationSystem::FrameToken frame_token_ = 0;
+    AutoCard* spin_ = nullptr;
+    AutoCard* bounce_ = nullptr;
+    AutoCard* pulse_ = nullptr;
+};
+
+const std::chrono::steady_clock::time_point AutoShowcase::kStart =
+    std::chrono::steady_clock::now();
 
 // ===== Page =====
 
@@ -584,10 +660,13 @@ Widget* make_animation_page(Window& win) {
     TooltipManager::instance().set_tooltip(run_all, "Run all 10 easing rows at once");
 
     // Right: color transition, expand card, progress bar
+    auto right_scroll = new ScrollView;
+    root->dock(right_scroll, Dock::Fill);
+
     auto right_stack = new StackPanel(Orientation::Vertical);
     right_stack->set_padding(18.0f);
     right_stack->set_spacing(14.0f);
-    root->dock(right_stack, Dock::Fill);
+    right_scroll->set_content(right_stack);
 
     auto color_hint = new Label("Color transition - click the card");
     color_hint->set_text_role(TextRole::Secondary);
@@ -650,6 +729,37 @@ Widget* make_animation_page(Window& win) {
     list->set_selected(5);
     right_stack->append_child(list);
     TooltipManager::instance().set_tooltip(randomize, "Randomize the progress value");
+
+    auto transform_hint = new Label("Visual transforms - implicit transition on visual state");
+    transform_hint->set_text_role(TextRole::Secondary);
+    transform_hint->set_small(true);
+    transform_hint->set_align(TextAlignH::Left, TextAlignV::Center);
+    right_stack->append_child(transform_hint);
+
+    // Transform rows: hover to scale, click to spin (out-back), click to fade + slide.
+    // Unlike explicit as.tween(), these use set_transition() so every set_scale /
+    // set_rotate_deg / set_opacity / set_translate call auto-tweens from the current value.
+    auto transform_row = new DockPanel;
+    transform_row->set_min_size(Size{0.0f, 96.0f});
+    right_stack->append_child(transform_row);
+
+    auto scale_card = new TransformCard("hover", demo::Accent(), TransformMode::ScaleHover);
+    auto spin_card = new TransformCard("spin", demo::Cyan, TransformMode::SpinClick);
+    auto fade_card = new TransformCard("fade", demo::Pink, TransformMode::FadeClick);
+    transform_row->dock(scale_card, Dock::Left);
+    transform_row->dock(spin_card, Dock::Left);
+    transform_row->dock(fade_card, Dock::Left);
+    scale_card->set_margin(Margins{0, 0, 12.0f, 0});
+    spin_card->set_margin(Margins{0, 0, 12.0f, 0});
+
+    auto auto_hint = new Label("Frame-driven visual states - on_frame runs at render pace");
+    auto_hint->set_text_role(TextRole::Secondary);
+    auto_hint->set_small(true);
+    auto_hint->set_align(TextAlignH::Left, TextAlignV::Center);
+    right_stack->append_child(auto_hint);
+
+    auto auto_showcase = new AutoShowcase;
+    right_stack->append_child(auto_showcase);
 
     auto overlay_hint = new Label("Overlay - click to show");
     overlay_hint->set_text_role(TextRole::Secondary);

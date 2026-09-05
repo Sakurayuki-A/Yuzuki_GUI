@@ -1,8 +1,10 @@
 #include <yuzuki/controls/text_box.hpp>
 #include <yuzuki/core/encoding.hpp>
 #include <yuzuki/ui/window.hpp>
+#include <yuzuki/ui/clipboard.hpp>
 
 #include <windows.h>
+#include <cwctype>
 
 namespace yzk {
 
@@ -21,41 +23,6 @@ FontId text_box_font(Window* win) {
 
 constexpr f32 kPadding = 6.0f;
 constexpr f32 kLineHeight = 20.0f;
-
-bool clipboard_set_text(const WString& text) {
-    if (!OpenClipboard(nullptr)) return false;
-    EmptyClipboard();
-    const SIZE_T bytes = (text.size() + 1) * sizeof(wchar_t);
-    HGLOBAL mem = GlobalAlloc(GMEM_MOVEABLE, bytes);
-    bool ok = false;
-    if (mem) {
-        void* data = GlobalLock(mem);
-        if (data) {
-            memcpy(data, text.c_str(), bytes);
-            GlobalUnlock(mem);
-            ok = SetClipboardData(CF_UNICODETEXT, mem) != nullptr;
-        } else {
-            GlobalFree(mem);
-        }
-    }
-    CloseClipboard();
-    return ok;
-}
-
-WString clipboard_get_text() {
-    WString result;
-    if (!OpenClipboard(nullptr)) return result;
-    HANDLE mem = GetClipboardData(CF_UNICODETEXT);
-    if (mem) {
-        const wchar_t* data = static_cast<const wchar_t*>(GlobalLock(mem));
-        if (data) {
-            result = data;
-            GlobalUnlock(mem);
-        }
-    }
-    CloseClipboard();
-    return result;
-}
 }  // namespace
 
 TextBox::TextBox(String text, TextBoxConfig config) : config_(config) {
@@ -88,20 +55,17 @@ TextBox& TextBox::set_text(const String& text) {
 }
 
 Size TextBox::measure_impl(Size available, const PaintContext* ctx) {
-    if (config_.mode == TextBoxMode::MultiLine) {
-        // Line metrics derive from the loaded font, never a hardcoded pixel value.
-        const f32 line_h = font_line_height(ctx);
-        f32 height = line_h;
-        if (ctx && !text_.empty()) {
-            const Size m = ctx->measure_text(utf::to_utf8(text_), false, available.width);
-            height = m.height > line_h ? m.height : line_h;
-        }
-        u32 lines = static_cast<u32>(height / line_h + 0.5f);
-        if (lines < config_.min_lines) lines = config_.min_lines;
-        if (lines > config_.max_lines) lines = config_.max_lines;
-        return Size{160.0f, static_cast<f32>(lines) * line_h + 8.0f};
-    }
     (void)available;
+    if (config_.mode == TextBoxMode::MultiLine) {
+        // Multiline is a fixed-height viewport: height never changes with the
+        // number of lines (overflow scrolls internally instead). When no explicit
+        // height is set, fall back to a fixed max_lines-tall box.
+        const f32 line_h = font_line_height(ctx);
+        const f32 fixed_h = config_.height > 1.0f
+                                ? config_.height
+                                : static_cast<f32>(config_.max_lines) * line_h + 8.0f;
+        return Size{160.0f, fixed_h};
+    }
     (void)ctx;
     return Size{160.0f, config_.height};
 }
@@ -164,8 +128,11 @@ void TextBox::paint_impl(PaintContext& ctx) {
     const Theme& theme = ctx.theme();
     const RectF& b = bounds_;
 
-    ctx.fill_rounded(b, theme.surface, theme.corner_radius);
-    ctx.draw_border(b, focused_ ? theme.accent : theme.border, 1.0f, theme.corner_radius);
+    if (!config_.transparent) {
+        ctx.fill_rounded(b, theme.surface, theme.control_radius);
+        ctx.draw_border(b, focused_ ? theme.accent : theme.border, theme.border_width,
+                        theme.control_radius);
+    }
 
     const bool password = config_.mode == TextBoxMode::Password;
 
@@ -183,6 +150,25 @@ void TextBox::paint_impl(PaintContext& ctx) {
 
     if (config_.mode == TextBoxMode::MultiLine) {
         scroll_offset_ = 0.0f;
+        // Fixed-height viewport: content that outgrows it scrolls upward while
+        // keeping the caret line visible. Scroll is tracked in pixels from the
+        // backend's wrap-aware caret position, so wrapped lines stay aligned.
+        const f32 lh = font_line_height(&ctx);
+        const f32 view_h = b.height() - kPadding * 2.0f;
+        const String u8 = utf::to_utf8(visible);
+        const Size cm = ctx.measure_text(u8, false, text_rect.width());
+        const f32 content_h = cm.height;
+        const f32 max_scroll = content_h > view_h ? (content_h - view_h) : 0.0f;
+        f32 caret_y = 0.0f;
+        if (Window* win = window()) {
+            const FontId font = text_box_font(win);
+            caret_y = win->backend().caret_position(
+                font, u8, text_rect.width(), static_cast<i32>(cursor_)).y;
+        }
+        if (caret_y < scroll_v_) scroll_v_ = caret_y;                    // move up
+        if (caret_y + lh > scroll_v_ + view_h) scroll_v_ = caret_y + lh - view_h;  // move down
+        if (scroll_v_ < 0.0f) scroll_v_ = 0.0f;
+        if (scroll_v_ > max_scroll) scroll_v_ = max_scroll;
     } else {
         const f32 prefix_w = prefix.empty() ? 0.0f : ctx.measure_text(utf::to_utf8(prefix)).width;
         const f32 avail = text_rect.width() - 4.0f;
@@ -191,12 +177,17 @@ void TextBox::paint_impl(PaintContext& ctx) {
     }
     const f32 ox = -scroll_offset_;
 
-    ctx.push_clip(text_rect);
     const bool multiline = config_.mode == TextBoxMode::MultiLine;
+    const f32 scroll_px = multiline ? scroll_v_ : 0.0f;
+
+    ctx.push_clip(text_rect);
     const f32 draw_w = multiline ? text_rect.width() : 1e7f;
+    // Draw the FULL multiline content (height unbounded): D2D's draw_text clips to
+    // the rect, so a viewport-height rect would hard-cut scrolled-away rows. The
+    // visible window is kept by the widget's own clip above.
     const RectF draw_rect = RectF::make(text_rect.left + ox,
-                                        multiline ? b.top + kPadding : text_rect.top,
-                                        draw_w, text_rect.height());
+                                        (multiline ? b.top + kPadding : text_rect.top) - scroll_px,
+                                        draw_w, multiline ? 1e7f : text_rect.height());
     if (password && !empty) {
         const WString masked = shown;
         const f32 cy = text_rect.top + text_rect.height() * 0.5f;
@@ -207,8 +198,10 @@ void TextBox::paint_impl(PaintContext& ctx) {
             ctx.fill_circle(Point{cx, cy}, w * 0.42f, color);
         }
     } else {
-        ctx.draw_text(empty ? placeholder_ : utf::to_utf8(visible), draw_rect, color,
-                      TextAlignH::Left, multiline ? TextAlignV::Top : TextAlignV::Center);
+        const Color text_color = selection_begin() != selection_end() ? theme.selection_text : color;
+        ctx.draw_text(empty ? placeholder_ : utf::to_utf8(visible), draw_rect, text_color,
+                      TextAlignH::Left, multiline ? TextAlignV::Top : TextAlignV::Center,
+                      /*wrap=*/multiline);
     }
 
     // IME pre-edit underline spanning the composition span.
@@ -220,9 +213,8 @@ void TextBox::paint_impl(PaintContext& ctx) {
             const Point p1 = win->backend().caret_position(
                 font, utf::to_utf8(visible), draw_w,
                 static_cast<i32>(cursor_ + static_cast<u32>(composition_.size())));
-            const f32 uy = multiline ? b.top + kPadding + p0.y + line_height() - 2.0f
-                                     : b.top + (b.height() - line_height()) / 2.0f +
-                                           line_height() - 2.0f;
+            const f32 uy = (multiline ? b.top + kPadding + p0.y : b.top + (b.height() - line_height()) / 2.0f) +
+                           line_height() - 2.0f - scroll_px;
             f32 ux0 = text_rect.left + ox + p0.x;
             f32 ux1 = text_rect.left + ox + p1.x;
             if (ux1 < ux0) ux1 = ux0 + 1.0f;
@@ -240,7 +232,7 @@ void TextBox::paint_impl(PaintContext& ctx) {
                 static_cast<i32>(sel_begin), static_cast<i32>(sel_end));
             for (const TextSelectionRect& s : rects) {
                 const f32 r_top = multiline
-                                      ? b.top + kPadding + s.rect.top
+                                      ? b.top + kPadding + s.rect.top - scroll_px
                                       : text_rect.top + (text_rect.height() - s.rect.height()) / 2.0f +
                                             s.rect.top;
                 const RectF r = RectF::make(text_rect.left + ox + s.rect.left, r_top,
@@ -259,7 +251,7 @@ void TextBox::paint_impl(PaintContext& ctx) {
                     text_box_font(win), utf::to_utf8(visible), text_rect.width(),
                     static_cast<i32>(comp_caret));
                 caret_x = text_rect.left + ox + cp.x;
-                caret_y = b.top + kPadding + cp.y;
+                caret_y = b.top + kPadding + cp.y - scroll_px;
             }
         } else {
             const u32 start = line_start(line_index_at(cursor_));
@@ -334,24 +326,17 @@ void TextBox::on_event(Event& e) {
                 e.consumed = true;
                 break;
             }
-            // Enter is handled in KeyDown (VK_RETURN) which already inserts the
-            // newline; TranslateMessage delivers WM_CHAR '\r' for the same press —
-            // ignoring it here prevents double newlines.
-            if (e.data.key.chr == L'\r') {
+            // Enter is owned entirely by KeyDown (VK_RETURN): single-line commit,
+            // multiline Enter/Ctrl+Enter newline. TranslateMessage delivers a
+            // WM_CHAR '\r' (and Ctrl+Enter a '\n') for the same press — ignoring
+            // every '\r'/'\n' here makes the KeyDown path the single insertion
+            // point, so no modifier-state guesswork and no double newlines.
+            if (e.data.key.chr == L'\r' || e.data.key.chr == '\n') {
                 e.consumed = true;
                 break;
             }
-            if (e.data.key.chr == '\n') {
-                if (config_.mode == TextBoxMode::MultiLine) {
-                    if (sel_start_ != cursor_) delete_selection();
-                    if (text_.size() < config_.max_length) {
-                        text_.insert(cursor_, 1, L'\n');
-                        ++cursor_;
-                        sel_start_ = cursor_;
-                        invalidate();
-                    }
-                }
-            } else if (e.data.key.chr >= 32 && e.data.key.chr != 127) {
+            if (e.data.key.chr >= 32 && e.data.key.chr != 127) {
+                begin_edit(EditKind::Typing);
                 if (sel_start_ != cursor_) delete_selection();
                 if (text_.size() < config_.max_length) {
                     text_.insert(cursor_, 1, static_cast<wchar_t>(e.data.key.chr));
@@ -378,7 +363,10 @@ void TextBox::on_event(Event& e) {
                 }
                 if (config_.read_only) break;
                 // A new composition replaces the current selection when committed.
-                if (composition_.empty() && sel_start_ != cursor_) delete_selection();
+                if (composition_.empty() && sel_start_ != cursor_) {
+                    begin_edit(EditKind::Typing);
+                    delete_selection();
+                }
                 composition_ = incoming;
                 composition_cursor_ = e.data.ime.cursor > composition_.size()
                                           ? static_cast<u32>(composition_.size())
@@ -393,6 +381,7 @@ void TextBox::on_event(Event& e) {
             composition_.clear();
             composition_cursor_ = 0;
             if (!focused_ || config_.read_only) break;
+            begin_edit(EditKind::Typing);
             insert_text(WString(e.data.ime.text ? e.data.ime.text : L"", e.data.ime.length));
             invalidate();
             break;
@@ -421,11 +410,103 @@ void TextBox::on_event(Event& e) {
                         copy_selection();
                         break;
                     case 'V':
-                        if (!config_.read_only) paste_from_clipboard();
+                        if (!config_.read_only) {
+                            begin_edit(EditKind::Paste);
+                            paste_from_clipboard();
+                        }
                         break;
                     case 'X':
-                        if (!config_.read_only) cut_selection();
+                        if (!config_.read_only) {
+                            begin_edit(EditKind::Cut);
+                            cut_selection();
+                        }
                         break;
+                    case 'Z':
+                        // Ctrl+Z undoes; Ctrl+Shift+Z redoes (common Windows layout).
+                        if (shift) {
+                            redo();
+                        } else {
+                            undo();
+                        }
+                        break;
+                    case 'Y':
+                        redo();
+                        break;
+                    case VK_RETURN:
+                        // Ctrl+Enter always inserts a newline (IM habit), even when
+                        // plain Enter submits; only meaningful in multiline mode.
+                        if (config_.mode == TextBoxMode::MultiLine && !config_.read_only) {
+                            begin_edit(EditKind::Typing);
+                            if (sel_start_ != cursor_) delete_selection();
+                            if (text_.size() < config_.max_length) {
+                                text_.insert(cursor_, 1, L'\n');
+                                ++cursor_;
+                                sel_start_ = cursor_;
+                                invalidate();
+                            }
+                        }
+                        break;
+                    case VK_LEFT:
+                    case VK_RIGHT: {
+                        // Word jump (Ctrl+Left/Right); Ctrl+Shift+extends selection.
+                        if (shift && !has_sel) sel_start_ = cursor_;
+                        const i32 target =
+                            word_jump(e.data.key.code == VK_LEFT ? -1 : 1);
+                        cursor_ = static_cast<u32>(target);
+                        if (!shift) sel_start_ = cursor_;
+                        invalidate();
+                        break;
+                    }
+                    case VK_BACK: {
+                        // Ctrl+Backspace deletes the word to the left.
+                        if (config_.read_only) break;
+                        const i32 target = has_sel ? static_cast<i32>(selection_begin())
+                                                   : word_jump(-1);
+                        if (has_sel || target < static_cast<i32>(cursor_))
+                            begin_edit(EditKind::Delete);
+                        if (has_sel) {
+                            delete_selection();
+                        } else {
+                            text_.erase(static_cast<u32>(target),
+                                        cursor_ - static_cast<u32>(target));
+                            cursor_ = static_cast<u32>(target);
+                            sel_start_ = cursor_;
+                            invalidate();
+                        }
+                        break;
+                    }
+                    case VK_DELETE: {
+                        // Ctrl+Delete deletes the word to the right.
+                        if (config_.read_only) break;
+                        const u32 start = cursor_;
+                        const i32 target = has_sel ? 0 : word_jump(1);
+                        if (has_sel || target > static_cast<i32>(start))
+                            begin_edit(EditKind::Delete);
+                        if (has_sel) {
+                            delete_selection();
+                        } else {
+                            text_.erase(start, static_cast<u32>(target) - start);
+                            sel_start_ = cursor_;
+                            invalidate();
+                        }
+                        break;
+                    }
+                    case VK_HOME: {
+                        // Ctrl+Home jumps to the start of the document.
+                        if (shift && !has_sel) sel_start_ = cursor_;
+                        cursor_ = 0;
+                        if (!shift) sel_start_ = cursor_;
+                        invalidate();
+                        break;
+                    }
+                    case VK_END: {
+                        // Ctrl+End jumps to the end of the document.
+                        if (shift && !has_sel) sel_start_ = cursor_;
+                        cursor_ = static_cast<u32>(text_.size());
+                        if (!shift) sel_start_ = cursor_;
+                        invalidate();
+                        break;
+                    }
                     default:
                         break;
                 }
@@ -436,12 +517,19 @@ void TextBox::on_event(Event& e) {
             switch (e.data.key.code) {
                 case VK_RETURN:
                     if (config_.mode == TextBoxMode::MultiLine && !config_.read_only) {
-                        if (sel_start_ != cursor_) delete_selection();
-                        if (text_.size() < config_.max_length) {
-                            text_.insert(cursor_, 1, L'\n');
-                            ++cursor_;
-                            sel_start_ = cursor_;
-                            invalidate();
+                        // Multiline: Enter submits when enter_submits is on,
+                        // otherwise it inserts a newline like a plain editor.
+                        if (config_.enter_submits) {
+                            if (on_commit_cb_) on_commit_cb_();
+                        } else {
+                            begin_edit(EditKind::Typing);
+                            if (sel_start_ != cursor_) delete_selection();
+                            if (text_.size() < config_.max_length) {
+                                text_.insert(cursor_, 1, L'\n');
+                                ++cursor_;
+                                sel_start_ = cursor_;
+                                invalidate();
+                            }
                         }
                     } else if (on_commit_cb_) {
                         on_commit_cb_();
@@ -450,6 +538,7 @@ void TextBox::on_event(Event& e) {
                     break;
                 case VK_BACK:
                     if (config_.read_only) break;
+                    if (has_sel || cursor_ > 0) begin_edit(EditKind::Delete);
                     if (has_sel) {
                         delete_selection();
                     } else {
@@ -459,6 +548,7 @@ void TextBox::on_event(Event& e) {
                     break;
                 case VK_DELETE:
                     if (config_.read_only) break;
+                    if (has_sel || cursor_ < text_.size()) begin_edit(EditKind::Delete);
                     if (has_sel) {
                         delete_selection();
                     } else if (cursor_ < text_.size()) {
@@ -582,7 +672,7 @@ void TextBox::set_cursor_by_pos(f32 x, f32 y) {
         if (!win) return;
         const FontId font = text_box_font(win);
         const f32 lx = x - kPadding;
-        const f32 ly = y - kPadding;
+        const f32 ly = y - kPadding + scroll_v_;
         // Same wrap width as painting, so the clicked line breaks match what is drawn.
         i32 index = win->backend().hit_test_text(font, utf::to_utf8(text_),
                                                  bounds_.width() - kPadding * 2.0f -
@@ -631,6 +721,67 @@ void TextBox::insert_text(const WString& text) {
     sel_start_ = cursor_;
 }
 
+// ===== Undo / redo (5.3.1) =====
+
+// Consecutive same-kind edits inside a short window coalesce into one undo step:
+// a typing run ("hello") or a backspace run reverts as a unit, but a paste or a
+// cut always starts a new group.
+void TextBox::begin_edit(EditKind kind) {
+    redo_stack_.clear();
+    const u64 now = GetTickCount64();
+    const bool coalesce = !undo_stack_.empty() && kind == last_kind_ &&
+                          now - last_edit_ms_ < 500;
+    if (!coalesce) {
+        undo_stack_.push_back(Snapshot{text_, cursor_, sel_start_});
+        if (undo_stack_.size() > 1000) undo_stack_.erase(undo_stack_.begin());
+    }
+    last_edit_ms_ = now;
+    last_kind_ = kind;
+}
+
+void TextBox::undo() {
+    if (undo_stack_.empty()) return;
+    redo_stack_.push_back(Snapshot{text_, cursor_, sel_start_});
+    if (redo_stack_.size() > 1000) redo_stack_.erase(redo_stack_.begin());
+    const Snapshot s = std::move(undo_stack_.back());
+    undo_stack_.pop_back();
+    text_ = s.text;
+    cursor_ = s.cursor;
+    sel_start_ = s.sel;
+    last_edit_ms_ = 0;  // break any open coalescing run
+    invalidate();
+}
+
+void TextBox::redo() {
+    if (redo_stack_.empty()) return;
+    undo_stack_.push_back(Snapshot{text_, cursor_, sel_start_});
+    if (undo_stack_.size() > 1000) undo_stack_.erase(undo_stack_.begin());
+    const Snapshot s = std::move(redo_stack_.back());
+    redo_stack_.pop_back();
+    text_ = s.text;
+    cursor_ = s.cursor;
+    sel_start_ = s.sel;
+    last_edit_ms_ = 0;
+    invalidate();
+}
+
+// Words are maximal runs of non-whitespace; navigation skips the run then the
+// gap. delta=-1 lands at the start of the word to the left, +1 just past the
+// word to the right.
+i32 TextBox::word_jump(i32 delta) const {
+    const i32 n = static_cast<i32>(text_.size());
+    if (n == 0) return 0;
+    i32 p = static_cast<i32>(cursor_);
+    if (delta > 0) {
+        while (p < n && iswspace(text_[p])) ++p;           // gap
+        while (p < n && !iswspace(text_[p])) ++p;          // word
+    } else {
+        while (p > 0 && iswspace(text_[p - 1])) --p;       // gap
+        while (p > 0 && !iswspace(text_[p - 1])) --p;      // word
+    }
+    return p;
+}
+
 RectF TextBox::ime_caret_rect() const {
     Window* win = window();
     if (!win || !focused_) return RectF{};
@@ -647,7 +798,7 @@ RectF TextBox::ime_caret_rect() const {
         font, utf::to_utf8(visible), lay_w,
         static_cast<i32>(cursor_ + composition_cursor_));
     const f32 x = g.left + kPadding - scroll_offset_ + cp.x;
-    const f32 y = multiline ? g.top + kPadding + cp.y
+    const f32 y = multiline ? g.top + kPadding + cp.y - scroll_v_
                             : g.top + (g.height() - line_height()) / 2.0f;
     return RectF::make(x, y, 2.0f, line_height());
 }
@@ -666,14 +817,14 @@ void TextBox::copy_selection() const {
     const u32 begin = selection_begin();
     const u32 end = selection_end();
     if (begin == end) return;
-    clipboard_set_text(text_.substr(begin, end - begin));
+    clipboard::set_text(utf::to_utf8(text_.substr(begin, end - begin)));
 }
 
 void TextBox::cut_selection() {
     const u32 begin = selection_begin();
     const u32 end = selection_end();
     if (begin == end) return;
-    clipboard_set_text(text_.substr(begin, end - begin));
+    clipboard::set_text(utf::to_utf8(text_.substr(begin, end - begin)));
     text_.erase(begin, end - begin);
     cursor_ = begin;
     sel_start_ = cursor_;
@@ -681,7 +832,8 @@ void TextBox::cut_selection() {
 }
 
 void TextBox::paste_from_clipboard() {
-    WString pasted = clipboard_get_text();
+    const String pasted_u8 = clipboard::get_text();
+    WString pasted = utf::to_wide(pasted_u8);
     if (pasted.empty()) return;
     if (sel_start_ != cursor_) delete_selection();
     const u32 room = static_cast<u32>(text_.size()) < config_.max_length ? config_.max_length - static_cast<u32>(text_.size()) : 0;

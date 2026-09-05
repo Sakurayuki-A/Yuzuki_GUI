@@ -33,6 +33,9 @@ public:
     void paint_impl(PaintContext& ctx) override;
     void on_event(Event& e) override;
 
+    String uia_name() const override { return text_; }
+    String uia_role() const override { return "CheckBox"; }
+
 private:
     String text_;
     bool checked_ = false;

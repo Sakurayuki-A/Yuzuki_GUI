@@ -45,10 +45,51 @@ struct Theme {
     Color selection_bg{0x5A, 0x8F, 0xFF, 0xA6};
     Color selection_text{0x1E, 0x1E, 0x1E};
 
+    // ---- Typography scale (Phase 2.2): semantic roles. ----
+    // type_body == font_size, type_caption == font_size_small; the *_size fields are
+    // the raw values paint() reads, type_* are the semantic names apps should use.
+    f32 type_display = 34.0f;
+    f32 type_headline = 28.0f;
+    f32 type_title = 20.0f;
+    f32 type_body = 14.0f;
+    f32 type_label = 13.0f;
+    f32 type_caption = 12.0f;
+
     String font_family = "Lexend Deca";
     f32 font_size = 14.0f;
     f32 font_size_small = 12.0f;
     f32 font_size_title = 18.0f;
+
+    // ---- Geometry tokens (Phase 2.1) ----
+    // Standard interactive control height; compact controls (check, radio, toggle)
+    // use a smaller height via their own const until migrated.
+    f32 control_height = 32.0f;
+    f32 control_height_compact = 28.0f;
+
+    // Fixed control radius for inputs/buttons; radius_sm/md raised for cards.
+    f32 control_radius = 4.0f;
+    f32 radius_sm = 4.0f;
+    f32 radius_md = 8.0f;
+    f32 radius_pill = 999.0f;
+
+    f32 border_width = 1.0f;
+    f32 border_width_strong = 1.5f;
+
+    f32 scrollbar_width = 6.0f;
+    f32 scrollbar_margin = 2.0f;
+    f32 wheel_step = 40.0f;
+    f32 scrollbar_thumb_min = 24.0f;
+
+    // ---- Elevation shadows (Phase 2.4): semantic levels, not per-control numbers. ----
+    // Floating is for menus / dropdowns / tooltips (navigation surfaces);
+    // notice is for transient feedback (notifications, toasts) — lighter by intent.
+    // blur only; draw_shadow() applies these together.
+    f32 shadow_blur_floating = 14.0f;
+    f32 shadow_offset_floating = 4.0f;
+    u8 shadow_alpha_floating = 70;
+    f32 shadow_blur_notice = 12.0f;
+    f32 shadow_offset_notice = 4.0f;
+    u8 shadow_alpha_notice = 40;
 
     f32 corner_radius = 4.0f;
     f32 spacing = 8.0f;

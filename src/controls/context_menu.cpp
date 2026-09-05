@@ -15,20 +15,23 @@ constexpr f32 kGap = 4.0f;
 
 }  // namespace
 
-void ContextMenu::add_item(const String& text, std::function<void()> action) {
+ContextMenu& ContextMenu::add_item(const String& text, std::function<void()> action) {
     items_.push_back(ContextMenuItem{text, std::move(action)});
     invalidate();
+    return *this;
 }
 
-void ContextMenu::add_separator() {
+ContextMenu& ContextMenu::add_separator() {
     items_.push_back(ContextMenuItem{String{}, nullptr, true});
     invalidate();
+    return *this;
 }
 
-void ContextMenu::clear_items() {
+ContextMenu& ContextMenu::clear_items() {
     items_.clear();
     hover_ = -1;
     invalidate();
+    return *this;
 }
 
 Size ContextMenu::measure_impl(Size available, const PaintContext* ctx) {
@@ -49,9 +52,10 @@ void ContextMenu::paint_impl(PaintContext& ctx) {
     const f32 alpha = progress_;
     const Theme& theme = Theme::get();
 
-    ctx.draw_shadow(bounds_, kRadius, 14.0f, Color{0x00, 0x00, 0x00, (u8)(70 * alpha)});
+    ctx.draw_shadow(bounds_, kRadius, theme.shadow_blur_floating,
+                    Color{0x00, 0x00, 0x00, (u8)(theme.shadow_alpha_floating * alpha)});
     ctx.fill_rounded(bounds_, theme.surface.with_alpha((u8)(255 * alpha)), kRadius);
-    ctx.draw_border(bounds_, theme.border.with_alpha((u8)(200 * alpha)), 1.0f, kRadius);
+    ctx.draw_border(bounds_, theme.border.with_alpha((u8)(200 * alpha)), theme.border_width, kRadius);
 
     f32 y = bounds_.top + kGap;
     for (size_t i = 0; i < items_.size(); ++i) {

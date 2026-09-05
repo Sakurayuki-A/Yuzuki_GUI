@@ -1,6 +1,6 @@
 # YuzukiUI — Developer Guide & Development Status
 
-> For the product pitch and vision, see [VISION.md](VISION.md). This document is for
+> For the product pitch and vision, see [README.md](../README.md). This document is for
 > developers: how the framework works, what is implemented, and where the project is going.
 
 ## Overview
@@ -10,11 +10,43 @@ with Direct2D / DirectWrite / DXGI and has no third-party dependencies — only 
 system APIs. Windows are trees of widgets; changes to the tree or widget state trigger
 on-demand repainting of only the damaged regions.
 
-- **Version:** 0.2.0 (alpha)
+- **Version:** 0.3.0 (alpha)
 - **Platform:** Windows 10+ (x64), Visual Studio 2022 / MSVC
 - **Language:** C++17
 - **License:** MIT
 - **Dependencies:** `d2d1`, `dwrite`, `dxgi`, `d3d11`, `d3dcompiler`, `winmm` (all system libs)
+
+## Goals
+
+Yuzuki's direction is one concrete target split into two explicit, measurable goals —
+the realistic one, instead of "build a brand-new Qt":
+
+**① DX — closer to Electron.** Not copying HTML/CSS, but copying its core advantages:
+the developer experience that lets a newcomer ship a complete UI fast.
+
+- API that is easy to understand
+- Sensible default behavior (few knobs to turn before something works)
+- Simple layout model
+- Unified styling
+- Controls that work out of the box
+- Docs that are easy to follow
+- A newcomer can write a complete UI quickly
+- Advanced capability is reached gradually — never a wall of low-level details at the door
+
+**② Runtime — keep every native advantage.** Preserve what Yuzuki already has:
+
+- Direct2D rendering
+- C++17
+- Native windows
+- Low memory footprint
+- No Chromium
+- No JS runtime
+- No full browser engine
+- Small runtime
+
+Every framework decision is weighed against these two goals. If it improves DX without
+sacrificing the native runtime, it's aligned; if it drags the runtime toward a bundled
+browser, it's not.
 
 ## Frame pipeline (actual)
 
@@ -99,7 +131,7 @@ Deliberate deviations from the textbook model, and why:
 - **PaintContext** — records draw calls into a command list each frame (window-space
   coords with bounding boxes), then replays only commands intersecting the dirty rects.
 - **RenderBackend** — abstract render interface (currently a single Direct2D
-  implementation; Windows-only by design, see VISION.md).
+  implementation; Windows-only by design, see README.md).
 
 ## Rendering pipeline
 
@@ -195,6 +227,35 @@ codepoints.
   caret via `ImmSetCompositionWindow/CandidateWindow`. Password fields disable the IME
   entirely (`ImmAssociateContext`). Events: `ImeCompose` / `ImeCommit`.
 
+## Platform services
+
+- **Clipboard** — `clipboard::set_text / get_text / has_text` (UTF-8): the framework-wide
+  entry point promoted out of TextBox's private helpers; every control and app code shares it.
+- **Dialogs** — `MessageBox` (framework-rendered, non-blocking modal built on Overlay:
+  Info / Confirm / YesNo / YesNoCancel; Esc = Cancel, backdrop = None, animated) and
+  native `open_file_dialog` / `save_file_dialog` (IFileOpenDialog / IFileSaveDialog with
+  filters, multi-select, UTF-8 paths).
+- **Accelerators** — window-level key chords (`Window::add_accelerator`) fire before the
+  key reaches the focused widget. Editing-protection rule: while a text input has focus,
+  chords without modifiers and editing combos the input already handles (Ctrl+Z/X/C/V/A,
+  word navigation, arrows, …) are skipped; app chords like Ctrl+S always win.
+- **Secondary windows** — `set_owner` (lifetime / z-order / minimize binding),
+  `set_modal` (owner disabled for the child's lifetime), `set_topmost`, and
+  `loop_until_closed()` (nested message pump for blocking dialog flow).
+- **RichText lite (Label)** — one string, inline non-nested spans: `**bold**`,
+  `~highlight~` (accent), `[label](action)`; link spans are hover-tracked and clickable
+  (`set_on_span_click`, `hit_link`).
+- **TextBox editing depth** — undo/redo with typing-run coalescing (`begin_edit`),
+  word-boundary navigation (`word_jump`, Ctrl+Left/Right/Backspace/Delete), fixed-height
+  multiline viewport with internal vertical scrolling, `TextBoxConfig::enter_submits`
+  (Enter submit / Ctrl+Enter newline) and `transparent` (host draws the frame).
+- **App shell** — `cmake/yuzuki_app_shell.cmake`: `yuzuki_add_app_shell(<target>)`
+  attaches the app icon (`resources/app-shell/yuzuki.ico`) and a PerMonitorV2 /
+  ComCtl-v6 manifest (`/MANIFESTINPUT` merge) and copies the framework fonts. Spec:
+  docs/APP_SHELL.md.
+- **Accessibility (UIA, minimal)** — `Widget::uia_name() / uia_role()` virtuals; controls
+  with text override them for screen readers.
+
 ## Controls inventory
 
 | Category  | Controls |
@@ -205,6 +266,7 @@ codepoints.
 | Lists     | ListView (virtualized via DataSource, custom row delegates) |
 | Feedback  | ProgressBar (determinate / indeterminate), Notification, Tooltip |
 | Menus     | ContextMenu |
+| Tabs      | TabControl |
 | Panels    | StackPanel, FlexBox, GridPanel, DockPanel, WrapPanel |
 | Effects   | BackdropBlur, Overlay (modal / drop-down, animated) |
 
@@ -215,15 +277,19 @@ only visible rows are laid out, hit-tested, and painted — 10,000+ rows render 
 
 | Example        | What it demonstrates                                           |
 | -------------- | -------------------------------------------------------------- |
-| hello          | Minimal app                                                    |
-| controls_demo  | Every built-in control and its events                          |
+| hello          | Minimal app — the on-ramp for new developers                   |
+| playground     | Playground over every widget, layout, and event                |
 | animation_demo | Tweens, transitions, effects                                   |
-| transform_demo | Visual transforms and auto-animation                           |
 | icofont_demo   | 100 Phosphor icons in a virtualized grid; click-to-copy codepoint |
 | window_demo    | Borderless windows, custom captions, resize, maximize          |
 | render_demo    | Gradients, shadows, blur, clipping, paint order                |
 | layout_test    | Layout invariants for every panel type (runnable assertion suite) |
 | perf_demo      | 2000-widget grid, dirty-rect partial repaint, frame stats HUD  |
+| debug_demo     | DebugOverlay (F1) + WidgetInspector (F2) walkthrough            |
+| api_validate   | Runnable transcription of docs/API.md (docs-as-code validation) |
+| app_shell      | App-shell template: icon + DPI/ComCtl manifest via yuzuki_add_app_shell |
+| cookbook_settings / cookbook_login / cookbook_chat / cookbook_dialogs | Cookbook pages: settings, login, chat, dialogs (docs/COOKBOOK.md) |
+| explorer       | A file explorer built on the framework                          |
 | codex_ui       | A complete chat UI built on the framework                      |
 
 ## Building & testing
@@ -234,8 +300,10 @@ cmake --build build --config Release
 ctest --test-dir build -C Release
 ```
 
-Run any demo from `build\examples\Release\<name>.exe`. Unit tests cover encoding, geometry,
-layout invariants, animation math, and core utilities (169 checks).
+Run any demo from `build\examples\Release\<name>.exe`. Tests: **548 core checks**
+(encoding, geometry, layout invariants, animation math, clipboard, dialogs,
+accelerators, secondary windows) plus **93 visual-regression checks** (offscreen
+renders vs 24 pixel-hash baselines, `tests/test_visual.cpp`).
 
 ## Development progress
 
@@ -254,14 +322,24 @@ layout invariants, animation math, and core utilities (169 checks).
   `measure_ms()`, `PaintCommand::source` widget pointer for profiling / a11y,
   `Widget::reset_painted_bounds()` for expand/collapse culling recovery
 - Examples: 10 runnable demos including a 2000-widget perf test
-- Tests: 174 checks passing
+- Tests: 548 core checks + 93 visual-regression checks passing
 - IME: inline composition in TextBox, caret-anchored candidate window, password opt-out
+- Platform: framework clipboard, MessageBox + native file dialogs, window accelerators,
+  secondary-window ownership / modal, app shell (icon + manifest)
+- Text: Label RichText lite (spans + clickable links), TextBox undo/redo, word navigation,
+  multiline viewport scrolling
+- Controls: TabControl added (25 controls across 9 categories)
+- Accessibility: `Widget::uia_name()/uia_role()` UIA minimal set
 
 ### Next
 
-Roadmap for 0.3.0: harden the core, cut frame cost, and close the visual quality gaps in
-effects. No cross-platform backends are planned — Yuzuki stays Windows + Direct2D
-(see [VISION.md](VISION.md)).
+Phase 5 — Framework Maturity is in progress (see the DX Roadmap doc for the full plan):
+5.1 visual regression + device-loss hook, 5.2 platform services, 5.3 text depth, 5.4
+TabControl, and the 5.5 app shell have landed. Remaining: CMake install/export
+(`find_package(yuzuki)`), long-run audit, recovery-path automation beyond the device-loss
+hook, UIA beyond Name/Role. Hot Reload is Phase 6, gated on Phase 5 acceptance + an API
+freeze window. No cross-platform backends are planned — Yuzuki stays Windows + Direct2D
+(see [README.md](../README.md)).
 
 #### Breaking changes (0.3.0)
 
@@ -365,4 +443,4 @@ Behavior changes:
 3. **Fast** — fine-grained dirty rects + command lists + deferred shadows + GPU rendering; measured,
    not assumed.
 
-See [VISION.md](VISION.md) for the product vision behind these principles.
+See [README.md](../README.md) for the product vision behind these principles.

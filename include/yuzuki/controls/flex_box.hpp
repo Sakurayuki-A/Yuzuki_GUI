@@ -30,10 +30,10 @@ public:
     FlexBox& set_spacing(f32 spacing);
     FlexBox& spacing(f32 spacing) { return set_spacing(spacing); }
 
-    FlexAlign main_align() const { return main_align_; }
+    FlexAlign align_main() const { return main_align_; }
     FlexBox& set_align_main(FlexAlign align);
 
-    FlexCrossAlign cross_align() const { return cross_align_; }
+    FlexCrossAlign align_cross() const { return cross_align_; }
     FlexBox& set_align_cross(FlexCrossAlign align);
 
     Size measure_content(Size available, const PaintContext* ctx) override;

@@ -199,7 +199,10 @@ public:
         }
     }
     bool animating() const { return token_ != 0; }
-    void set_transition(f32 ms) { transition_ms_ = ms; }
+    AnimatablePropertyBase& set_transition(f32 ms) {
+        transition_ms_ = ms;
+        return *this;
+    }
     f32 transition() const { return transition_ms_; }
 
 protected:
